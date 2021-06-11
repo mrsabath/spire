@@ -141,7 +141,14 @@ func (is *IdentitySchema) getValueFromAttestor(pod *corev1.Pod, name string, att
 		log.Print("** Processing nodeAttestor")
 		return "value-from-node-Attestor"
 	case "workloadAttestor":
-		return getValueFromWorkloadAttestor(pod, attestor.Mapping)
+		// if _, err := idSchema.loadConfig("/run/identity-schema/config/identity-schema.yaml"); err != nil {
+		value, err := getValueFromWorkloadAttestor(pod, attestor.Mapping)
+		if err != nil {
+			log.Printf("%s", err)
+		} else {
+			return value
+		}
+
 	default:
 		log.Print("** Unknown attestor name")
 	}
@@ -156,7 +163,7 @@ func (is *IdentitySchema) getValueFromConfgimap(name string, configmap *ConfigMa
 	return name
 }
 
-func getValueFromWorkloadAttestor(pod *corev1.Pod, mapping []Mapping) string {
+func getValueFromWorkloadAttestor(pod *corev1.Pod, mapping []Mapping) (msg string, err error) {
 
 	for _, field := range mapping {
 
@@ -166,22 +173,24 @@ func getValueFromWorkloadAttestor(pod *corev1.Pod, mapping []Mapping) string {
 		case "k8s":
 			switch field.Field {
 			case "sa":
-				return pod.Spec.ServiceAccountName
+				return pod.Spec.ServiceAccountName, nil
 			case "ns":
-				return pod.Namespace
+				return pod.Namespace, nil
 			case "pod-name":
-				return pod.Name
+				return pod.Name, nil
 			case "pod-uid":
-				return string(pod.UID)
+				return string(pod.UID), nil
 			default:
-				log.Printf("*** Unknown field for k8s attestor: %s", field.Field)
+				err := fmt.Errorf("Unknown field for k8s attestor: %s", field.Field)
+				log.Printf("%s", err)
 			}
 		case "xxx":
 			log.Printf("*** Processing xxx attestor")
 		default:
-			log.Printf("*** Unknown workload attestor type: %s", field.Type)
+			err := fmt.Errorf("Unknown attestor type: %s", field.Type)
+			log.Printf("%s", err)
 		}
 
 	}
-	return "***Error"
+	return msg, fmt.Errorf("Cannot find a mapping match. Error: %s", err)
 }
