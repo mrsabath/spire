@@ -23,7 +23,7 @@ type Field struct {
 }
 
 type Source interface {
-	GetValue(pod *corev1.Pod, fieldName string) (string, error)
+	GetValue(pod *corev1.Pod) (string, error)
 }
 
 // type AttestorSource struct {
@@ -129,7 +129,13 @@ func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) string {
 	att := field.AttestorSource
 	if att != nil {
 		log.Printf("* Field Attestor Group Name: %v", att.Group)
-		return att.GetValue(pod, field.Name)
+		value, err := att.GetValue(pod)
+		if err != nil {
+			log.Printf("* Error processing the field %s, with attestor source %v", field.Name, err)
+			// TODO for now, when error return the field name
+			return field.Name
+		}
+		return value
 	}
 
 	cm := field.ConfigMapSource
@@ -137,43 +143,50 @@ func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) string {
 		log.Printf("* ConfigMap Name %s", cm.Name)
 		log.Printf("* ConfigMap Field %s", cm.Field)
 		log.Printf("* ConfigMap Namespace %s", cm.Namespace)
-		return cm.GetValue(pod, field.Name)
+		value, err := cm.GetValue(pod)
+		if err != nil {
+			log.Printf("* Error processing the field %s, with configMap source: %v", field.Name, err)
+			// TODO for now, when error return the field name
+			return field.Name
+		}
+		return value
 	}
 
 	// TODO for now if value unknown, just return the field name
+	log.Printf("* Error processing the field %s, no matching source!", field.Name)
 	return field.Name
 }
 
 //func (at *AttestorSource) getValue(pod *corev1.Pod, name string, attestor *Attestor) string {
-func (at *AttestorSource) GetValue(pod *corev1.Pod, fieldName string) string {
+func (at *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
 	// log.Printf("** Attestor group: %s", attestor.Group)
 	// log.Printf("** This attestor uses mapping: %#v", attestor.Mapping)
 
 	switch at.Group {
 	case "nodeAttestor":
 		log.Print("** Processing nodeAttestor")
-		return "value-from-node-Attestor"
+		return "value-from-node-Attestor", nil
 	case "workloadAttestor":
 		// if _, err := idSchema.loadConfig("/run/identity-schema/config/identity-schema.yaml"); err != nil {
-		value, err := at.getValueFromWorkloadAttestor(pod, at.Mapping)
+		value, err = at.getValueFromWorkloadAttestor(pod, at.Mapping)
 		if err != nil {
 			log.Printf("%s", err)
+			return value, err
 		} else {
-			return value
+			return value, nil
 		}
-
 	default:
 		log.Print("** Unknown attestor name")
+		err := fmt.Errorf("Unknown attestor name: %s", at.Group)
+		return value, err
 	}
-	// TODO for now if value unknown, just return the field name
-	return fieldName
 }
 
-func (cms *ConfigMapSource) GetValue(pod *corev1.Pod, fieldName string) string {
+func (cms *ConfigMapSource) GetValue(pod *corev1.Pod) (value string, err error) {
 	log.Printf("** ConfigMap namespace: %s, name: %s, field: %s", cms.Namespace, cms.Name, cms.Field)
 
-	// TODO for now, just return the field name
-	return fieldName
+	err = fmt.Errorf("Function not implemented for %s", "configMapSource")
+	return value, err
 }
 
 func (at *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod, mapping []Mapping) (msg string, err error) {
