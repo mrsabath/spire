@@ -34,15 +34,16 @@ import (
 
 // PodReconcilerConfig holds the config passed in when creating the reconciler
 type PodReconcilerConfig struct {
-	Client             client.Client
-	Cluster            string
-	Ctx                context.Context
-	DisabledNamespaces []string
-	Log                logrus.FieldLogger
-	PodLabel           string
-	PodAnnotation      string
-	Scheme             *runtime.Scheme
-	TrustDomain        string
+	Client               client.Client
+	Cluster              string
+	Ctx                  context.Context
+	DisabledNamespaces   []string
+	Log                  logrus.FieldLogger
+	PodLabel             string
+	PodAnnotation        string
+	Scheme               *runtime.Scheme
+	TrustDomain          string
+	IdentitySchemaConfig string
 }
 
 // PodReconciler holds the runtime configuration and state of this controller
@@ -56,7 +57,12 @@ type PodReconciler struct {
 func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 
 	idSchema := IdentitySchema{}
-	if _, err := idSchema.loadConfig("/run/identity-schema/config/identity-schema.yaml"); err != nil {
+	identitySchemaConfig := config.IdentitySchemaConfig
+	if identitySchemaConfig == "" {
+		identitySchemaConfig = "/run/identity-schema/config/identity-schema.yaml"
+		log.Printf("Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
+	}
+	if _, err := idSchema.loadConfig(identitySchemaConfig); err != nil {
 		// if _, err := idSchema.loadConfig("/tmp/identity-schema.yaml"); err != nil {
 		log.Printf("Error getting IdenitySchema config %v", err)
 		//log.Fatalf()

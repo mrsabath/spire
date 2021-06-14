@@ -17,23 +17,33 @@ type IdentitySchema struct {
 }
 
 type Field struct {
-	Name   string  `yaml:"name"`
-	Source *Source `yaml:"source"`
+	Name            string           `yaml:"name"`
+	AttestorSource  *AttestorSource  `yaml:"attestorSource,omitempty"`
+	ConfigMapSource *ConfigMapSource `yaml:"configMapSource,omitempty"`
 }
 
-type Source struct {
-	Name      string     `yaml:"name"`
-	Attestor  *Attestor  `yaml:"attestor,omitempty"`
-	ConfigMap *ConfigMap `yaml:"configMap,omitempty"`
+type Source interface {
+	GetValue(pod *corev1.Pod, fieldName string) (string, error)
 }
 
-type ConfigMap struct {
-	Namespace string `yaml:"ns"`
+// type AttestorSource struct {
+// 	Name     string    `yaml:"name"`
+// 	Attestor *Attestor `yaml:"attestor,omitempty"`
+// }
+
+// type ConfigMapSource struct {
+// 	Name      string     `yaml:"name"`
+// 	ConfigMap *ConfigMap `yaml:"configMap,omitempty"`
+// }
+
+type ConfigMapSource struct {
 	Name      string `yaml:"name"`
+	Namespace string `yaml:"ns"`
 	Field     string `yaml:"field"`
 }
 
-type Attestor struct {
+type AttestorSource struct {
+	Name    string    `yaml:"name"`
 	Group   string    `yaml:"group"`
 	Mapping []Mapping `yaml:"mapping"`
 }
@@ -107,42 +117,45 @@ func (is *IdentitySchema) getId(pod *corev1.Pod) string {
 	fields := is.Fields
 	for i, field := range fields {
 		log.Printf("%d Field name: %s", i, field.Name)
-		log.Printf("%d Field source: %v", i, field.Source.Name)
-		idString += "/" + is.getValue(pod, field)
+		// log.Printf("%d Field source: %v", i, field.)
+
+		idString += "/" + is.getFieldValue(pod, field)
 	}
 	log.Printf("ID Value: %s", idString)
 	return idString
 }
 
-func (is *IdentitySchema) getValue(pod *corev1.Pod, field Field) string {
-	att := field.Source.Attestor
+func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) string {
+	att := field.AttestorSource
 	if att != nil {
 		log.Printf("* Field Attestor Group Name: %v", att.Group)
-		return is.getValueFromAttestor(pod, field.Name, att)
+		return att.GetValue(pod, field.Name)
 	}
 
-	cm := field.Source.ConfigMap
+	cm := field.ConfigMapSource
 	if cm != nil {
 		log.Printf("* ConfigMap Name %s", cm.Name)
 		log.Printf("* ConfigMap Field %s", cm.Field)
 		log.Printf("* ConfigMap Namespace %s", cm.Namespace)
+		return cm.GetValue(pod, field.Name)
 	}
 
 	// TODO for now if value unknown, just return the field name
 	return field.Name
 }
 
-func (is *IdentitySchema) getValueFromAttestor(pod *corev1.Pod, name string, attestor *Attestor) string {
+//func (at *AttestorSource) getValue(pod *corev1.Pod, name string, attestor *Attestor) string {
+func (at *AttestorSource) GetValue(pod *corev1.Pod, fieldName string) string {
 	// log.Printf("** Attestor group: %s", attestor.Group)
 	// log.Printf("** This attestor uses mapping: %#v", attestor.Mapping)
 
-	switch attestor.Group {
+	switch at.Group {
 	case "nodeAttestor":
 		log.Print("** Processing nodeAttestor")
 		return "value-from-node-Attestor"
 	case "workloadAttestor":
 		// if _, err := idSchema.loadConfig("/run/identity-schema/config/identity-schema.yaml"); err != nil {
-		value, err := getValueFromWorkloadAttestor(pod, attestor.Mapping)
+		value, err := at.getValueFromWorkloadAttestor(pod, at.Mapping)
 		if err != nil {
 			log.Printf("%s", err)
 		} else {
@@ -153,17 +166,17 @@ func (is *IdentitySchema) getValueFromAttestor(pod *corev1.Pod, name string, att
 		log.Print("** Unknown attestor name")
 	}
 	// TODO for now if value unknown, just return the field name
-	return name
+	return fieldName
 }
 
-func (is *IdentitySchema) getValueFromConfgimap(name string, configmap *ConfigMap) string {
-	log.Printf("** ConfigMap namespace: %s, name: %s, field: %s", configmap.Namespace, configmap.Name, configmap.Field)
+func (cms *ConfigMapSource) GetValue(pod *corev1.Pod, fieldName string) string {
+	log.Printf("** ConfigMap namespace: %s, name: %s, field: %s", cms.Namespace, cms.Name, cms.Field)
 
 	// TODO for now, just return the field name
-	return name
+	return fieldName
 }
 
-func getValueFromWorkloadAttestor(pod *corev1.Pod, mapping []Mapping) (msg string, err error) {
+func (at *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod, mapping []Mapping) (msg string, err error) {
 
 	for _, field := range mapping {
 
