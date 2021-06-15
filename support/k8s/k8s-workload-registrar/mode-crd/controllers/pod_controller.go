@@ -60,11 +60,11 @@ func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 	identitySchemaConfig := config.IdentitySchemaConfig
 	if identitySchemaConfig == "" {
 		identitySchemaConfig = "/run/identity-schema/config/identity-schema.yaml"
-		log.Printf("Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
+		log.Printf("pod_controller, newPodReconciler: Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
 	}
 	if _, err := idSchema.loadConfig(identitySchemaConfig); err != nil {
 		// if _, err := idSchema.loadConfig("/tmp/identity-schema.yaml"); err != nil {
-		log.Printf("Error getting IdenitySchema config %v", err)
+		log.Printf("pod_controller, newPodReconciler: Error getting IdenitySchema config %v", err)
 		//log.Fatalf()
 	}
 	return &PodReconciler{
@@ -115,6 +115,8 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 		return ctrl.Result{}, nil
 	}
 
+	newSelector := r.getSelectors(pod)
+
 	federationDomains := federation.GetFederationDomains(pod)
 
 	// Set up new SPIFFE ID
@@ -131,11 +133,12 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 			ParentId:      r.podParentID(pod.Spec.NodeName),
 			DnsNames:      []string{pod.Name}, // Set pod name as first DNS name
 			FederatesWith: federationDomains,
-			Selector: spiffeidv1beta1.Selector{
-				PodUid:    pod.GetUID(),
-				Namespace: pod.Namespace,
-				NodeName:  pod.Spec.NodeName,
-			},
+			Selector:      newSelector,
+			// Selector: spiffeidv1beta1.Selector{
+			// 	PodUid:    pod.GetUID(),
+			// 	Namespace: pod.Namespace,
+			// 	NodeName:  pod.Spec.NodeName,
+			// },
 		},
 	}
 	err := setOwnerRef(pod, spiffeID, r.c.Scheme)
@@ -178,6 +181,7 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 
 // podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
 func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
+	log.Printf("Pod_controller, podSpiffeID: processing pod: %s", pod.Name)
 	if r.c.PodLabel != "" {
 		// the controller has been configured with a pod label. if the pod
 		// has that label, use the value to construct the pod entry. otherwise
@@ -201,11 +205,43 @@ func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
 	// the controller has not been configured with a pod label or a pod annotation.
 	// create an entry based on the service account.
 	//return makeID(r.c.TrustDomain, "v1/provider/eu-de/%s/%s/%s", pod.Namespace, pod.Spec.ServiceAccountName, pod.Spec.Containers[0].Name)
-	newId := r.is.getId(pod)
+
+	// TODO setup some new variable to trigger the Identity Schema processing
+	newId := r.is.getSVID(pod)
+
 	return makeID(r.c.TrustDomain, newId)
 	// return makeID(r.c.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
 }
 
 func (r *PodReconciler) podParentID(nodeName string) string {
 	return makeID(r.c.TrustDomain, "k8s-workload-registrar/%s/node/%s", r.c.Cluster, nodeName)
+}
+
+// podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
+func (r *PodReconciler) getSelectors(pod *corev1.Pod) spiffeidv1beta1.Selector {
+	log.Printf("Pod_controller, getSelectors: processing pod: %s", pod.Name)
+	if r.c.IdentitySchemaConfig == "" {
+		log.Printf("Pod_controller, getSelectors: IdentitySchema is empty for pod: %s", pod.Name)
+		log.Printf("*******Config %#v", r.c)
+		// newSelector := spiffeidv1beta1.Selector{
+		// 	PodUid:    pod.GetUID(),
+		// 	Namespace: pod.Namespace,
+		// 	NodeName:  pod.Spec.NodeName,
+		// }
+		// return newSelector
+	}
+
+	// if r.c.PodAnnotation != "" {
+	// 	// the controller has been configured with a pod annotation. if the pod
+	// 	// has that annotation, use the value to construct the pod entry. otherwise
+	// 	// ignore the pod altogether.
+	// 	if annotationValue, ok := pod.Annotations[r.c.PodAnnotation]; ok {
+	// 		return makeID(r.c.TrustDomain, "%s", annotationValue)
+	// 	}
+	// 	return ""
+	// }
+
+	// TODO setup some new variable to trigger the Identity Schema processing
+	newSelector := r.is.getSelector(pod)
+	return newSelector
 }
