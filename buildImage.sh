@@ -1,6 +1,6 @@
 #! /bin/bash
 
-VERSION=0.12.2
+VERSION=0.12.1
 
 
 # make bin/k8s-workload-registrar
