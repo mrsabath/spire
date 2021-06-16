@@ -47,9 +47,9 @@ type ConfigMapSource struct {
 }
 
 type AttestorSource struct {
-	Name    string    `yaml:"name"`
-	Group   string    `yaml:"group"`
-	Mapping []Mapping `yaml:"mapping"`
+	Name     string    `yaml:"name"`
+	Group    string    `yaml:"group"`
+	Mappings []Mapping `yaml:"mapping"`
 }
 
 type Mapping struct {
@@ -57,23 +57,24 @@ type Mapping struct {
 	Field string `yaml:"field"`
 }
 
-func (is *IdentitySchema) loadConfig(fileName string) (*IdentitySchema, error) {
+func loadConfig(fileName string) (*IdentitySchema, error) {
 
-	log.Print("identity_schema, loadConfig: before read")
+	is := IdentitySchema{}
+	log.Printf("identity_schema, loadConfig: before read, fileName: %s", fileName)
 	yamlFile, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		log.Printf("identity_schema, loadConfig: Error reading yaml file %s:  %v ", fileName, err)
-		return is, err
+		return &is, err
 	}
-	log.Print("identity_schema, loadConfig: after read")
+	log.Printf("identity_schema, loadConfig: after read %s", yamlFile)
 
-	err = yaml.Unmarshal(yamlFile, is)
+	err = yaml.Unmarshal(yamlFile, &is)
 	if err != nil {
 		//log.Fatalf("Unmarshal: %v", err)
 		log.Printf("identity_schema, loadConfig: Error processing YAML file %v", err)
-		return is, err
+		return &is, err
 	}
-	return is, nil
+	return &is, nil
 }
 
 func main() {
@@ -81,7 +82,7 @@ func main() {
 
 	// if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
 
-	if _, err := is.loadConfig("/tmp/identity-schema.yaml"); err != nil {
+	if _, err := loadConfig("/tmp/identity-schema.yaml"); err != nil {
 		log.Fatalf("Error getting IdenitySchema config %v", err)
 	}
 
@@ -119,44 +120,51 @@ func (is *IdentitySchema) getSVID(pod *corev1.Pod) string {
 	var idString string = ""
 	fields := is.Fields
 	for i, field := range fields {
+
+		if field.Name == "" {
+			log.Printf("identity_schema, getSVID. ERROR: field name must be set")
+			continue
+		}
 		log.Printf("identity_schema, getId: %d Field name: %s", i, field.Name)
-		idString += "/" + is.getFieldValue(pod, field)
+		val, err := is.getFieldValue(pod, field)
+		if err != nil {
+			log.Printf("identity_schema, getId: %d Error processing field %s: %v", i, field.Name, err)
+
+			// TODO for now, let's use the field name instead of the value
+			val = field.Name
+			log.Printf("identity_schema, getId: Using field name instead of the value: %s", field.Name)
+		}
+		idString += "/" + val
 	}
 	log.Printf("identity_schema, getSVID: ID Value: %s", idString)
 	return idString
 }
 
-func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) string {
+func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) (string, error) {
 
-	att := field.AttestorSource
-	if att != nil {
-		log.Printf("* identity_schema, getFieldValue: Field Attestor Group Name: %v", att.Group)
-		value, err := att.GetValue(pod)
+	switch {
+	case field.AttestorSource != nil:
+		log.Printf("* identity_schema, getFieldValue: Field Attestor Group Name: %v", field.AttestorSource.Group)
+		value, err := field.AttestorSource.GetValue(pod)
 		if err != nil {
-			log.Printf("* identity_schema, getFieldValue: Error processing the field %s, with attestor source %v", field.Name, err)
-			// TODO for now, when error return the field name
-			return field.Name
+			log.Printf("* identity_schema, getFieldValue: Error processing the attestor source field=%s: %v", field.Name, err)
+			return field.Name, err
 		}
-		return value
-	}
-
-	cm := field.ConfigMapSource
-	if cm != nil {
-		log.Printf("* identity_schema, getFieldValue: ConfigMap Name %s", cm.Name)
-		log.Printf("* identity_schema, getFieldValue: ConfigMap Field %s", cm.Field)
-		log.Printf("* identity_schema, getFieldValue: ConfigMap Namespace %s", cm.Namespace)
-		value, err := cm.GetValue(pod)
+		return value, nil
+	case field.ConfigMapSource != nil:
+		log.Printf("* identity_schema, getFieldValue: ConfigMap Name %s", field.ConfigMapSource.Name)
+		log.Printf("* identity_schema, getFieldValue: ConfigMap Field %s", field.ConfigMapSource.Field)
+		log.Printf("* identity_schema, getFieldValue: ConfigMap Namespace %s", field.ConfigMapSource.Namespace)
+		value, err := field.ConfigMapSource.GetValue(pod)
 		if err != nil {
-			log.Printf("* identity_schema, getFieldValue: Error processing the field %s, with configMap source: %v", field.Name, err)
-			// TODO for now, when error return the field name
-			return field.Name
+			log.Printf("* identity_schema, getFieldValue: Error processing the configmMap source field=%s: %v", field.Name, err)
+			return field.Name, err
 		}
-		return value
+		return value, nil
+	default:
+		err := fmt.Errorf("Unknown or missing source for field: %s", field.Name)
+		return field.Name, err
 	}
-
-	// TODO for now if value unknown, just return the field name
-	log.Printf("* identity_schema, getFieldValue: Error processing the field %s, no matching source!", field.Name)
-	return field.Name
 }
 
 func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
@@ -197,24 +205,16 @@ func (cms *ConfigMapSource) GetValue(pod *corev1.Pod) (value string, err error) 
 func (att *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod) (selectorName string, fieldValue string, err error) {
 
 	log.Printf("*** identity_schema, getValueWorkloadAttestor for pod %s", pod.Name)
-	for _, field := range att.Mapping {
+	for _, field := range att.Mappings {
 
 		// only certain fields are valid as selectors, other will be ignored
 		switch field.Type {
 		case "k8s":
-			switch field.Field {
-			case "sa":
-				return serviceAccountLabel, pod.Spec.ServiceAccountName, nil
-			case "ns":
-				return namespaceLabel, pod.Namespace, nil
-			case "pod-name":
-				return podNameLabel, pod.Name, nil
-			case "pod-uid":
-				return podUIDLabel, string(pod.UID), nil
-			default:
-				err := fmt.Errorf("Unknown field for k8s attestor: %s", field.Field)
-				log.Printf("%s", err)
+			selectorName, fieldValue, err = getValueFromK8s(field.Field, pod)
+			if err != nil {
+				log.Printf("Error retrieving k8s values for field=%s: %v", field.Field, err)
 			}
+			return selectorName, fieldValue, err
 		// to be used by other attestor types
 		case "xxx":
 			log.Printf("*** Processing xxx attestor")
@@ -226,9 +226,37 @@ func (att *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod) (select
 	return selectorName, fieldValue, fmt.Errorf("Cannot find a mapping match. Error: %s", err)
 }
 
+// getValueFromK8s - helper function to process values from K8s:
+func getValueFromK8s(fieldName string, pod *corev1.Pod) (selectorName string, fieldValue string, err error) {
+	switch fieldName {
+	case "sa":
+		return serviceAccountLabel, pod.Spec.ServiceAccountName, nil
+	case "ns":
+		return namespaceLabel, pod.Namespace, nil
+	case "pod-name":
+		return podNameLabel, pod.Name, nil
+	case "pod-uid":
+		return podUIDLabel, string(pod.UID), nil
+	default:
+		err := fmt.Errorf("Unknown field for k8s attestor: %s", fieldName)
+		log.Printf("%s", err)
+		return selectorName, fieldValue, err
+	}
+}
+
 func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector {
 
 	log.Printf("*** identity_schema, getSelector :Creating Selectors for pod: %s", pod.Name)
+
+	// create default selector if no identity schema fields available
+	if is.Fields == nil {
+		newSelector := spiffeidv1beta1.Selector{
+			PodUid:    pod.GetUID(),
+			Namespace: pod.Namespace,
+			NodeName:  pod.Spec.NodeName,
+		}
+		return newSelector
+	}
 
 	// create a new Selector object
 	// always assign the NodeName value

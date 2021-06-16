@@ -56,21 +56,22 @@ type PodReconciler struct {
 // NewPodReconciler creates a new PodReconciler object
 func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 
-	idSchema := IdentitySchema{}
+	// get identity schema config here, otherwise use default value
 	identitySchemaConfig := config.IdentitySchemaConfig
 	if identitySchemaConfig == "" {
 		identitySchemaConfig = "/run/identity-schema/config/identity-schema.yaml"
 		log.Printf("pod_controller, newPodReconciler: Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
 	}
-	if _, err := idSchema.loadConfig(identitySchemaConfig); err != nil {
-		// if _, err := idSchema.loadConfig("/tmp/identity-schema.yaml"); err != nil {
-		log.Printf("pod_controller, newPodReconciler: Error getting IdenitySchema config %v", err)
-		//log.Fatalf()
+	// exit if canfig cannot be loaded
+	log.Printf("pod_controller, NewPodReconiler. loadConfig with %s",identitySchemaConfig)
+	idSchema, err := loadConfig(identitySchemaConfig)
+	if err != nil {
+		log.Fatalf("Error loading configuration for identity schema %s. Error %v", identitySchemaConfig, err)
 	}
 	return &PodReconciler{
 		Client: config.Client,
 		c:      config,
-		is:     idSchema,
+		is:     *idSchema,
 	}
 }
 
@@ -115,8 +116,7 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 		return ctrl.Result{}, nil
 	}
 
-	newSelector := r.getSelectors(pod)
-
+	newSelector := r.is.getSelector(pod)
 	federationDomains := federation.GetFederationDomains(pod)
 
 	// Set up new SPIFFE ID
@@ -215,33 +215,4 @@ func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
 
 func (r *PodReconciler) podParentID(nodeName string) string {
 	return makeID(r.c.TrustDomain, "k8s-workload-registrar/%s/node/%s", r.c.Cluster, nodeName)
-}
-
-// podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
-func (r *PodReconciler) getSelectors(pod *corev1.Pod) spiffeidv1beta1.Selector {
-	log.Printf("Pod_controller, getSelectors: processing pod: %s", pod.Name)
-	if r.c.IdentitySchemaConfig == "" {
-		log.Printf("Pod_controller, getSelectors: IdentitySchema is empty for pod: %s", pod.Name)
-		log.Printf("*******Config %#v", r.c)
-		// newSelector := spiffeidv1beta1.Selector{
-		// 	PodUid:    pod.GetUID(),
-		// 	Namespace: pod.Namespace,
-		// 	NodeName:  pod.Spec.NodeName,
-		// }
-		// return newSelector
-	}
-
-	// if r.c.PodAnnotation != "" {
-	// 	// the controller has been configured with a pod annotation. if the pod
-	// 	// has that annotation, use the value to construct the pod entry. otherwise
-	// 	// ignore the pod altogether.
-	// 	if annotationValue, ok := pod.Annotations[r.c.PodAnnotation]; ok {
-	// 		return makeID(r.c.TrustDomain, "%s", annotationValue)
-	// 	}
-	// 	return ""
-	// }
-
-	// TODO setup some new variable to trigger the Identity Schema processing
-	newSelector := r.is.getSelector(pod)
-	return newSelector
 }

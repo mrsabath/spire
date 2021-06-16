@@ -49,7 +49,7 @@ type CommonMode struct {
 	Mode               string   `hcl:"mode"`
 	DisabledNamespaces []string `hcl:"disabled_namespaces"`
 	serverAPI          ServerAPIClients
-	IdentitySchemaPath string `hcl:"idenity_schema_path"`
+	IdentitySchemaPath string `hcl:"identity_schema_path"`
 }
 
 func (c *CommonMode) ParseConfig(hclConfig string) error {
