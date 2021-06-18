@@ -63,7 +63,7 @@ func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 		log.Printf("pod_controller, newPodReconciler: Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
 	}
 	// exit if canfig cannot be loaded
-	log.Printf("pod_controller, NewPodReconiler. loadConfig with %s",identitySchemaConfig)
+	log.Printf("pod_controller, NewPodReconiler. loadConfig with %s", identitySchemaConfig)
 	idSchema, err := loadConfig(identitySchemaConfig)
 	if err != nil {
 		log.Fatalf("Error loading configuration for identity schema %s. Error %v", identitySchemaConfig, err)
@@ -110,7 +110,8 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 // updateorCreatePodEntry attempts to create a new SpiffeID resource.
 func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.Pod) (ctrl.Result, error) {
-	spiffeIDURI := r.podSpiffeID(pod)
+
+	spiffeIDURI := r.podSpiffeID(ctx, pod)
 	// If we have no spiffe ID for the pod, do nothing
 	if spiffeIDURI == "" {
 		return ctrl.Result{}, nil
@@ -180,7 +181,7 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 }
 
 // podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
-func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
+func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string {
 	log.Printf("Pod_controller, podSpiffeID: processing pod: %s", pod.Name)
 	if r.c.PodLabel != "" {
 		// the controller has been configured with a pod label. if the pod
@@ -207,7 +208,7 @@ func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
 	//return makeID(r.c.TrustDomain, "v1/provider/eu-de/%s/%s/%s", pod.Namespace, pod.Spec.ServiceAccountName, pod.Spec.Containers[0].Name)
 
 	// TODO setup some new variable to trigger the Identity Schema processing
-	newId := r.is.getSVID(pod)
+	newId := r.is.getSVID(ctx, pod, r.Client)
 
 	return makeID(r.c.TrustDomain, newId)
 	// return makeID(r.c.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)

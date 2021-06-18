@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: cluster-info
+  namespace: kube-system
+data:
+  cluster_id: c1s67n6d0bhf1a8hgtt0
+  cluster_name: prod-fra01-c1s67n6d0bhf1a8hgtt0
+  datacenter: fra01
+  name: space-x.01
+  cluster-region: eu-de

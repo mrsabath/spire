@@ -2,6 +2,7 @@
 package controllers
 
 import (
+	"context"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -9,8 +10,9 @@ import (
 	spiffeidv1beta1 "github.com/spiffe/spire/support/k8s/k8s-workload-registrar/mode-crd/api/spiffeid/v1beta1"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 const (
@@ -77,6 +79,8 @@ func loadConfig(fileName string) (*IdentitySchema, error) {
 	return &is, nil
 }
 
+/*
+
 func main() {
 	var is IdentitySchema
 
@@ -112,8 +116,9 @@ func main() {
 	log.Printf("Identity %#v", is)
 	fmt.Print(&is)
 }
+*/
 
-func (is *IdentitySchema) getSVID(pod *corev1.Pod) string {
+func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl client.Client) string {
 
 	log.Printf("identity_schema, getId: processing Pod %s", pod.Name)
 
@@ -126,7 +131,7 @@ func (is *IdentitySchema) getSVID(pod *corev1.Pod) string {
 			continue
 		}
 		log.Printf("identity_schema, getId: %d Field name: %s", i, field.Name)
-		val, err := is.getFieldValue(pod, field)
+		val, err := is.getFieldValue(ctx, pod, cl, field)
 		if err != nil {
 			log.Printf("identity_schema, getId: %d Error processing field %s: %v", i, field.Name, err)
 
@@ -140,7 +145,7 @@ func (is *IdentitySchema) getSVID(pod *corev1.Pod) string {
 	return idString
 }
 
-func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) (string, error) {
+func (is *IdentitySchema) getFieldValue(ctx context.Context, pod *corev1.Pod, cl client.Client, field Field) (string, error) {
 
 	switch {
 	case field.AttestorSource != nil:
@@ -152,10 +157,7 @@ func (is *IdentitySchema) getFieldValue(pod *corev1.Pod, field Field) (string, e
 		}
 		return value, nil
 	case field.ConfigMapSource != nil:
-		log.Printf("* identity_schema, getFieldValue: ConfigMap Name %s", field.ConfigMapSource.Name)
-		log.Printf("* identity_schema, getFieldValue: ConfigMap Field %s", field.ConfigMapSource.Field)
-		log.Printf("* identity_schema, getFieldValue: ConfigMap Namespace %s", field.ConfigMapSource.Namespace)
-		value, err := field.ConfigMapSource.GetValue(pod)
+		value, err := field.ConfigMapSource.GetValue(ctx, cl, field.ConfigMapSource)
 		if err != nil {
 			log.Printf("* identity_schema, getFieldValue: Error processing the configmMap source field=%s: %v", field.Name, err)
 			return field.Name, err
@@ -192,7 +194,46 @@ func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
 	}
 }
 
-func (cms *ConfigMapSource) GetValue(pod *corev1.Pod) (value string, err error) {
+func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, source *ConfigMapSource) (value string, err error) {
+	log.Printf("* identity_schema, getFieldValue: ConfigMap Name %s", source.Name)
+	log.Printf("* identity_schema, getFieldValue: ConfigMap Field %s", source.Field)
+	log.Printf("* identity_schema, getFieldValue: ConfigMap Namespace %s", source.Namespace)
+	// -------
+	cmlist := corev1.ConfigMapList{}
+	lopt := client.ListOptions{
+		Namespace: source.Namespace,
+	}
+	if err := cl.List(ctx, &cmlist, &lopt); err != nil {
+		log.Printf("**** 1")
+		if !errors.IsNotFound(err) {
+			log.Printf("**** 2")
+			//r.c.Log.WithError(err).Error("Unable to get Pod")
+			//return ctrl.Result{}, err
+		}
+		log.Printf("**** 3")
+		//return ctrl.Result{}, client.IgnoreNotFound(err)
+		// TODO: Address the permission error:
+		// E0618 19:27:47.507321      14 reflector.go:178] pkg/mod/k8s.io/client-go@v0.18.2/tools/cache/reflector.go:125: Failed to list *v1.ConfigMap: configmaps is forbidden: User "system:serviceaccount:spire:spire-k8s-registrar" cannot list resource "configmaps" in API group "" at the cluster scope
+
+	}
+	// get all the configmaps in provided namespace
+	for _, item := range cmlist.Items {
+		log.Printf("*** NAME %v", item.Name)
+		if item.Name == source.Name {
+			if item.Data == nil {
+				log.Printf("Error, missing data in configMap with name=%s", item.Name)
+				continue
+			}
+			log.Printf("*** DATA %#v", item.Data)
+			val := item.Data[source.Field]
+			if val != "" {
+				log.Printf("*** source.Field %v", val)
+				return val, nil
+			}
+			log.Printf("Field %s not found in ConfigMap %s", source.Field, source.Name)
+		}
+		log.Printf("No configMap with Name=%s in namespace %s found ", source.Name, source.Namespace)
+	}
 
 	log.Printf("** identity_schema, GetValue(ConfigMap): ConfigMap namespace: %s, name: %s, field: %s", cms.Namespace, cms.Name, cms.Field)
 	err = fmt.Errorf("Function not implemented for %s", "configMapSource")
