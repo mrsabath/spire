@@ -34,6 +34,7 @@ type IdentitySchema struct {
 
 type Field struct {
 	Name            string           `yaml:"name"`
+	Value           string           `yaml:"value,omitempty"`
 	AttestorSource  *AttestorSource  `yaml:"attestorSource,omitempty"`
 	ConfigMapSource *ConfigMapSource `yaml:"configMapSource,omitempty"`
 }
@@ -125,19 +126,27 @@ func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl clien
 	var idString string = ""
 	fields := is.Fields
 	for i, field := range fields {
-
+		var val string = ""
 		if field.Name == "" {
 			log.Printf("identity_schema, getSVID. ERROR: field name must be set")
 			continue
 		}
 		log.Printf("identity_schema, getId: %d Field name: %s", i, field.Name)
-		val, err := is.getFieldValue(ctx, pod, cl, field)
-		if err != nil {
-			log.Printf("identity_schema, getId: %d Error processing field %s: %v", i, field.Name, err)
 
-			// TODO for now, let's use the field name instead of the value
-			val = field.Name
-			log.Printf("identity_schema, getId: Using field name instead of the value: %s", field.Name)
+		if field.Value != "" {
+			// field Value ovverides any value provided by other sources
+			log.Printf("identity_schema, getSVID. Value provided, overriding the other sources")
+			val = field.Value
+		} else {
+			var err error
+			val, err = is.getFieldValue(ctx, pod, cl, field)
+			if err != nil {
+				log.Printf("identity_schema, getId: %d Error processing field %s: %v", i, field.Name, err)
+
+				// TODO for now, let's use the field name instead of the value
+				val = field.Name
+				log.Printf("identity_schema, getId: Using field name instead of the value: %s", field.Name)
+			}
 		}
 		idString += "/" + val
 	}
@@ -176,20 +185,20 @@ func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
 
 	switch att.Group {
 	case nodeAttestor:
-		log.Print("**identity_schema, GetValue: Processing nodeAttestor")
-		return "value-from-node-Attestor", nil
+		err = fmt.Errorf("Function for %s not implemented", "nodeAttestor")
+		return "value-from-node-Attestor", err
 	case workloadAttestor:
 		// here we don't need the selector values. We just need the value for the SPIFFE ID
 		_, value, err = att.getValueFromWorkloadAttestor(pod)
 		if err != nil {
-			log.Printf("%s", err)
+			log.Printf("Error: %s", err)
 			return value, err
 		} else {
 			return value, nil
 		}
 	default:
-		log.Print("** identity_schema, GetValue: Unknown attestor name")
 		err := fmt.Errorf("Unknown attestor name: %s", att.Group)
+		log.Printf("Error getting attestor: %v", err)
 		return value, err
 	}
 }
@@ -198,45 +207,39 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 	log.Printf("* identity_schema, getFieldValue: ConfigMap Name %s", source.Name)
 	log.Printf("* identity_schema, getFieldValue: ConfigMap Field %s", source.Field)
 	log.Printf("* identity_schema, getFieldValue: ConfigMap Namespace %s", source.Namespace)
-	// -------
+
+	// scope down the ConfigmMap list to the namespace provided in the configuration
 	cmlist := corev1.ConfigMapList{}
 	lopt := client.ListOptions{
 		Namespace: source.Namespace,
 	}
 	if err := cl.List(ctx, &cmlist, &lopt); err != nil {
-		log.Printf("**** 1")
 		if !errors.IsNotFound(err) {
-			log.Printf("**** 2")
-			//r.c.Log.WithError(err).Error("Unable to get Pod")
-			//return ctrl.Result{}, err
+			log.Printf("Error, unable to get ConfigMap list")
 		}
-		log.Printf("**** 3")
-		//return ctrl.Result{}, client.IgnoreNotFound(err)
 		// TODO: Address the permission error:
 		// E0618 19:27:47.507321      14 reflector.go:178] pkg/mod/k8s.io/client-go@v0.18.2/tools/cache/reflector.go:125: Failed to list *v1.ConfigMap: configmaps is forbidden: User "system:serviceaccount:spire:spire-k8s-registrar" cannot list resource "configmaps" in API group "" at the cluster scope
 
 	}
 	// get all the configmaps in provided namespace
 	for _, item := range cmlist.Items {
-		log.Printf("*** NAME %v", item.Name)
+
 		if item.Name == source.Name {
 			if item.Data == nil {
-				log.Printf("Error, missing data in configMap with name=%s", item.Name)
+				log.Printf("Error, missing data field in configMap with name=%s", item.Name)
 				continue
 			}
 			log.Printf("*** DATA %#v", item.Data)
 			val := item.Data[source.Field]
 			if val != "" {
-				log.Printf("*** source.Field %v", val)
 				return val, nil
 			}
-			log.Printf("Field %s not found in ConfigMap %s", source.Field, source.Name)
+			log.Printf("Data field %s not found in the ConfigMap %s", source.Field, source.Name)
 		}
-		log.Printf("No configMap with Name=%s in namespace %s found ", source.Name, source.Namespace)
-	}
 
-	log.Printf("** identity_schema, GetValue(ConfigMap): ConfigMap namespace: %s, name: %s, field: %s", cms.Namespace, cms.Name, cms.Field)
-	err = fmt.Errorf("Function not implemented for %s", "configMapSource")
+	}
+	err = fmt.Errorf("No configMap with Name=%s in namespace %s found ", source.Name, source.Namespace)
+	log.Printf("Error: %#v", err)
 	return value, err
 }
 
@@ -311,7 +314,7 @@ func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector 
 	for _, field := range is.Fields {
 
 		att := field.AttestorSource
-		// Selector are only relevant for workloadAttestor
+		// Selectors are only relevant for workloadAttestor
 		if att != nil && att.Group == workloadAttestor {
 			selectorName, selectorValue, err := att.getValueFromWorkloadAttestor(pod)
 			if err != nil {

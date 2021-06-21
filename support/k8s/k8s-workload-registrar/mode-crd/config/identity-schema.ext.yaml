@@ -7,7 +7,20 @@ data:
     version: v1
     fields:
       - name: provider
-        value: minikube
+        attestorSource:
+          name: nodeAttestor
+          group: nodeAttestor
+          mapping:
+          - type: aws
+            field: aws_iid:*
+          - type: gcloud
+            field: gcp_iit:*
+          - type: azure
+            field: azure_msi:*
+          - type: ibm
+            field: iks
+          - type: minikube
+            field: minikube
       - name: region
         configMapSource:
           ns: kube-system
@@ -34,3 +47,10 @@ data:
           mapping:
           - type: k8s
             field: pod-name
+      - name: pod-uid
+        attestorSource:
+          name: workloadAttestor
+          group: workloadAttestor
+          mapping:
+          - type: k8s
+            field: pod-uid
