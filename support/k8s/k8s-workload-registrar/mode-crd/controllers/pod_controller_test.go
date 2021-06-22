@@ -16,6 +16,7 @@ limitations under the License.
 package controllers
 
 import (
+	"log"
 	"testing"
 
 	spiffeidv1beta1 "github.com/spiffe/spire/support/k8s/k8s-workload-registrar/mode-crd/api/spiffeid/v1beta1"
@@ -109,6 +110,7 @@ func (s *PodControllerTestSuite) TestPodLabel() {
 		})
 		s.Require().NoError(err)
 		s.Require().Len(spiffeIDList.Items, 1)
+		log.Printf("****POD LIST %#v", spiffeIDList.Items)
 
 		// Verify the label/annotation matches what we expect
 		expectedSpiffeID := makeID(s.trustDomain, "%s", test.first)

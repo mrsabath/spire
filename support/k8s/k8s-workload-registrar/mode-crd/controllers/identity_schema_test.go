@@ -53,31 +53,55 @@ func (s *IdentitySchemaTestSuite) SetupSuite() {
 func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 	tests := []struct {
 		PodName       string
+		PodNamespace  string
 		PodLabel      string
 		PodAnnotation string
 		first         string
 		second        string
 		expectedSvid  string
+		uid           string
 	}{
 		{
-			PodName:      "test-lablel",
+			PodName:      "test-label",
+			PodNamespace: "default",
 			PodLabel:     "spiffe",
 			first:        "test-label",
 			second:       "new-test-label",
 			expectedSvid: "test-label",
+			uid:          "123",
 		},
 		{
 			PodName:       "test-annotation",
+			PodNamespace:  "default",
 			PodAnnotation: "spiffe",
 			first:         "test-annotation",
 			second:        "new-test-annotation",
 			expectedSvid:  "test-annotation",
+			uid:           "456",
 		},
 		{
 			PodName:      "test-id-schema",
-			expectedSvid: "minikube/eu-de/default/default/test-pod",
+			PodNamespace: "default",
+			expectedSvid: "minikube/eu-de/default/default/test-id-schema",
+			uid:          "789",
 		},
 	}
+
+	// create configMap with cluster info
+	configMap := corev1.ConfigMap{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "cluster-info",
+			Namespace: "kube-system",
+		},
+		Data: map[string]string{"cluster-region": "eu-de"},
+	}
+
+	err := s.k8sClient.Create(s.ctx, &configMap)
+	if err != nil {
+		log.Printf("test, loadConfig: Error processing YAML file %v", err)
+
+	}
+	s.Require().NoError(err)
 
 	// for _, test := range tests {
 	for i, test := range tests {
@@ -96,10 +120,11 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 
 		pod := corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
-				Name:        PodName,
-				Namespace:   PodNamespace,
+				Name:        test.PodName,
+				Namespace:   test.PodNamespace,
 				Labels:      map[string]string{"spiffe": test.first},
 				Annotations: map[string]string{"spiffe": test.first},
+				UID:         types.UID(test.uid),
 			},
 			Spec: corev1.PodSpec{
 				Containers: []corev1.Container{{
@@ -112,7 +137,7 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		}
 		err := s.k8sClient.Create(s.ctx, &pod)
 		s.Require().NoError(err)
-		s.reconcile(p)
+		s.reconcile(p, test.PodName, test.PodNamespace)
 
 		// cInfo := corev1.ConfigMap{}
 		// clusterFile := "../config/cluster-info.yaml"
@@ -134,21 +159,6 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		// 	Labels:      map[string]string{},
 		// 	Annotations: map[string]string{},
 
-		// create configMap with cluster info
-		configMap := corev1.ConfigMap{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "cluster-info",
-				Namespace: "kube-system",
-			},
-			Data: map[string]string{"cluster-region": "eu-de"},
-		}
-
-		err = s.k8sClient.Create(s.ctx, &configMap)
-		if err != nil {
-			log.Printf("test, loadConfig: Error processing YAML file %v", err)
-
-		}
-		s.Require().NoError(err)
 		actualSvId := p.podSpiffeID(s.ctx, &pod)
 		log.Printf("*** actualSvId %s ", actualSvId)
 		// expectedSpiffeID := makeID(s.trustDomain, "%s", test.first)
@@ -159,17 +169,33 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		// expectedSvId := makeID(s.trustDomain, "%s/%s/%s/%s/%s", test.provider, test.region, test.namespace, test.sa, test.podName)
 		// s.Require().Equal(expectedSvId, actualSvId)
 		// s.reconcile(p)
+
 		labelSelector := labels.Set(map[string]string{
 			"podUid": string(pod.ObjectMeta.UID),
 		})
-
 		// Verify that exactly 1 SPIFFE ID  resource was created for this pod
 		spiffeIDList := spiffeidv1beta1.SpiffeIDList{}
 		err = s.k8sClient.List(s.ctx, &spiffeIDList, &client.ListOptions{
 			LabelSelector: labelSelector.AsSelector(),
 		})
 		s.Require().NoError(err)
+		log.Printf("**** Selectors %#v", spiffeIDList.Items[0].Spec.Selector)
 		s.Require().Len(spiffeIDList.Items, 1)
+
+		log.Print("**** ALL GOOD")
+
+		// // TODO same results as above, verify if always use the same path
+		// res, err := p.updateorCreatePodEntry(s.ctx, &pod)
+		// if err != nil {
+		// 	log.Printf("Error!!! %v", err)
+		// }
+		// log.Printf("**** updateCreate %#v", res)
+		// s.reconcile(p, test.PodName, test.PodNamespace)
+		// spiffeIDList = spiffeidv1beta1.SpiffeIDList{}
+		// err = s.k8sClient.List(s.ctx, &spiffeIDList, &client.ListOptions{
+		// 	LabelSelector: labelSelector.AsSelector(),
+		// })
+		// log.Printf("**** UPDATED Selectors %#v", spiffeIDList.Items[0].Spec.Selector)
 
 		// // Verify the label/annotation matches what we expect
 		// expectedSpiffeID := makeID(s.trustDomain, "%s", test.first)
@@ -201,18 +227,20 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		// Delete Pod
 		err = s.k8sClient.Delete(s.ctx, &pod)
 		s.Require().NoError(err)
-		s.reconcile(p)
+		s.reconcile(p, test.PodName, PodNamespace)
 
-		err = s.k8sClient.Delete(s.ctx, &configMap)
-		s.Require().NoError(err)
-	}
+	} // for
+
+	// delete the configmap
+	err = s.k8sClient.Delete(s.ctx, &configMap)
+	s.Require().NoError(err)
 }
 
-func (s *IdentitySchemaTestSuite) reconcile(p *PodReconciler) {
+func (s *IdentitySchemaTestSuite) reconcile(p *PodReconciler, podName string, podNs string) {
 	req := ctrl.Request{
 		NamespacedName: types.NamespacedName{
-			Name:      PodName,
-			Namespace: PodNamespace,
+			Name:      podName,
+			Namespace: podNs,
 		},
 	}
 
