@@ -59,11 +59,12 @@ func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 	// get identity schema config here, otherwise use default value
 	identitySchemaConfig := config.IdentitySchemaConfig
 	if identitySchemaConfig == "" {
-		identitySchemaConfig = "/run/identity-schema/config/identity-schema.yaml"
+		identitySchemaConfig = "../config/identity-schema.yaml"
+		//identitySchemaConfig = "/run/identity-schema/config/identity-schema.yaml"
 		log.Printf("pod_controller, newPodReconciler: Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
 	}
 	// exit if canfig cannot be loaded
-	log.Printf("pod_controller, NewPodReconiler. loadConfig with %s", identitySchemaConfig)
+	//log.Printf("pod_controller, NewPodReconiler. loadConfig with %s", identitySchemaConfig)
 	idSchema, err := loadConfig(identitySchemaConfig)
 	if err != nil {
 		log.Fatalf("Error loading configuration for identity schema %s. Error %v", identitySchemaConfig, err)

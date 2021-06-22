@@ -1,36 +1,30 @@
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: identity-schema
-data:
-  identity-schema.yaml: |
-    version: v1
-    fields:
-      - name: provider
-        value: minikube
-      - name: region
-        configMapSource:
-          ns: kube-system
-          name: cluster-info
-          field: cluster-region
-      - name: workload-namespace
-        attestorSource:
-          name: workloadAttestor
-          group: workloadAttestor
-          mapping:
-          - type: k8s
-            field: ns
-      - name: workload-serviceAccount
-        attestorSource:
-          name: workloadAttestor
-          group: workloadAttestor
-          mapping:
-          - type: k8s
-            field: sa
-      - name: workload-podname
-        attestorSource:
-          name: workloadAttestor
-          group: workloadAttestor
-          mapping:
-          - type: k8s
-            field: pod-name
+version: v1
+fields:
+  - name: provider
+    value: minikube
+  - name: region
+    configMapSource:
+      ns: kube-system
+      name: cluster-info
+      field: cluster-region
+  - name: workload-namespace
+    attestorSource:
+      name: workloadAttestor
+      group: workloadAttestor
+      mapping:
+      - type: k8s
+        field: ns
+  - name: workload-serviceAccount
+    attestorSource:
+      name: workloadAttestor
+      group: workloadAttestor
+      mapping:
+      - type: k8s
+        field: sa
+  - name: workload-podname
+    attestorSource:
+      name: workloadAttestor
+      group: workloadAttestor
+      mapping:
+      - type: k8s
+        field: pod-name

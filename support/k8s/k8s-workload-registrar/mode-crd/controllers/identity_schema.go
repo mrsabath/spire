@@ -69,7 +69,7 @@ func loadConfig(fileName string) (*IdentitySchema, error) {
 		log.Printf("identity_schema, loadConfig: Error reading yaml file %s:  %v ", fileName, err)
 		return &is, err
 	}
-	log.Printf("identity_schema, loadConfig: after read %s", yamlFile)
+	//log.Printf("identity_schema, loadConfig: after read %s", yamlFile)
 
 	err = yaml.Unmarshal(yamlFile, &is)
 	if err != nil {
@@ -135,7 +135,7 @@ func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl clien
 
 		if field.Value != "" {
 			// field Value ovverides any value provided by other sources
-			log.Printf("identity_schema, getSVID. Value provided, overriding the other sources")
+			log.Printf("identity_schema, getSVID. Value provided=%s, overriding the other sources", field.Value)
 			val = field.Value
 		} else {
 			var err error
@@ -204,9 +204,7 @@ func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
 }
 
 func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, source *ConfigMapSource) (value string, err error) {
-	log.Printf("* identity_schema, getFieldValue: ConfigMap Name %s", source.Name)
-	log.Printf("* identity_schema, getFieldValue: ConfigMap Field %s", source.Field)
-	log.Printf("* identity_schema, getFieldValue: ConfigMap Namespace %s", source.Namespace)
+	log.Printf("* identity_schema, CM GetValue Name=%s, Field=%s, Namespace=%s", source.Name, source.Field, source.Namespace)
 
 	// scope down the ConfigmMap list to the namespace provided in the configuration
 	cmlist := corev1.ConfigMapList{}
@@ -223,6 +221,7 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 	}
 	// get all the configmaps in provided namespace
 	for _, item := range cmlist.Items {
+		log.Printf("***** Processing CM %s", item.Name)
 
 		if item.Name == source.Name {
 			if item.Data == nil {
@@ -232,6 +231,7 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 			log.Printf("*** DATA %#v", item.Data)
 			val := item.Data[source.Field]
 			if val != "" {
+				log.Printf("Fund CM value=%s", val)
 				return val, nil
 			}
 			log.Printf("Data field %s not found in the ConfigMap %s", source.Field, source.Name)
