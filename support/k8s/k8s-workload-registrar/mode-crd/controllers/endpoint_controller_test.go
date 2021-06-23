@@ -53,6 +53,7 @@ func (s *EndpointControllerTestSuite) TestAddDNSName() {
 		PodLabel:    "spiffe",
 		Scheme:      s.scheme,
 		TrustDomain: s.trustDomain,
+		IdentitySchemaConfig: isConfigFileTest,
 	})
 
 	e := NewEndpointReconciler(EndpointReconcilerConfig{
