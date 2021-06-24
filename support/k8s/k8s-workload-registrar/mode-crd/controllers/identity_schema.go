@@ -67,13 +67,11 @@ type Mapping struct {
 func loadConfig(fileName string) (*IdentitySchema, error) {
 
 	is := IdentitySchema{}
-	log.Printf("identity_schema, loadConfig: before read, fileName: %s", fileName)
 	yamlFile, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		log.Printf("identity_schema, loadConfig: Error reading yaml file %s:  %v ", fileName, err)
 		return &is, err
 	}
-	//log.Printf("identity_schema, loadConfig: after read %s", yamlFile)
 
 	err = yaml.Unmarshal(yamlFile, &is)
 	if err != nil {
@@ -84,52 +82,8 @@ func loadConfig(fileName string) (*IdentitySchema, error) {
 	return &is, nil
 }
 
-/*
-
-func main() {
-	var is IdentitySchema
-
-	// if err := r.Get(ctx, req.NamespacedName, &pod); err != nil {
-
-	if _, err := loadConfig("/tmp/identity-schema.yaml"); err != nil {
-		log.Fatalf("Error getting IdenitySchema config %v", err)
-	}
-
-	// Set up pod:
-	pod := &corev1.Pod{
-		Spec: corev1.PodSpec{
-			ServiceAccountName: "podServiceAccount",
-		},
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace:   "podNamespace",
-			Labels:      map[string]string{},
-			Annotations: map[string]string{},
-		},
-	}
-	// if testCase.configLabel != "" && testCase.podLabel != "" {
-	// 	pod.Labels[testCase.configLabel] = testCase.podLabel
-	// }
-	// if testCase.configAnnotation != "" && testCase.podAnnotation != "" {
-	// 	pod.Annotations[testCase.configAnnotation] = testCase.podAnnotation
-	// }
-
-	// Test:
-	//spiffeID := c.podSpiffeID(pod)
-
-	finalId := is.getSVID(pod)
-	log.Printf("** Final id %v", finalId)
-	log.Printf("Identity %#v", is)
-	fmt.Print(&is)
-}
-*/
-
 func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl client.Client) string {
 
-	// sample log format:
-	// r.c.Log.WithFields(logrus.Fields{
-	// 	"name":      spiffeID.Name,
-	// 	"namespace": spiffeID.Namespace,
-	// }).WithError(err).Error("Unable to fetch SpiffeID resource")
 	is.Log.WithFields(logrus.Fields{
 		"podName": pod.Name,
 	}).Debug("Executing getSVID")
