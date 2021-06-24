@@ -182,17 +182,20 @@ func (is *IdentitySchema) getFieldValue(ctx context.Context, pod *corev1.Pod, cl
 
 	switch {
 	case field.AttestorSource != nil:
-		log.Printf("* identity_schema, getFieldValue: Field Attestor Group Name: %v", field.AttestorSource.Group)
 		value, err := field.AttestorSource.GetValue(pod)
 		if err != nil {
-			log.Printf("* identity_schema, getFieldValue: Error processing the attestor source field=%s: %v", field.Name, err)
+			is.Log.WithFields(logrus.Fields{
+				"podName": pod.Name,
+			}).Errorf("Error processing the attestor source field=%s: %v", field.Name, err)
 			return field.Name, err
 		}
 		return value, nil
 	case field.ConfigMapSource != nil:
 		value, err := field.ConfigMapSource.GetValue(ctx, cl, field.ConfigMapSource)
 		if err != nil {
-			log.Printf("* identity_schema, getFieldValue: Error processing the configmMap source field=%s: %v", field.Name, err)
+			is.Log.WithFields(logrus.Fields{
+				"podName": pod.Name,
+			}).Errorf("Error processing the configmMap source field=%s: %v", field.Name, err)
 			return field.Name, err
 		}
 		return value, nil
@@ -203,9 +206,6 @@ func (is *IdentitySchema) getFieldValue(ctx context.Context, pod *corev1.Pod, cl
 }
 
 func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
-
-	log.Printf("** identity_schema, GetValue(Attestor): pod: %s", pod.Name)
-	// log.Printf("** This attestor uses mapping: %#v", attestor.Mapping)
 
 	switch att.Group {
 	case nodeAttestor:
@@ -228,7 +228,6 @@ func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
 }
 
 func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, source *ConfigMapSource) (value string, err error) {
-	log.Printf("* identity_schema, CM GetValue Name=%s, Field=%s, Namespace=%s", source.Name, source.Field, source.Namespace)
 
 	// scope down the ConfigmMap list to the namespace provided in the configuration
 	cmlist := corev1.ConfigMapList{}
@@ -245,17 +244,14 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 	}
 	// get all the configmaps in provided namespace
 	for _, item := range cmlist.Items {
-		log.Printf("***** Processing CM %s", item.Name)
 
 		if item.Name == source.Name {
 			if item.Data == nil {
 				log.Printf("Error, missing data field in configMap with name=%s", item.Name)
 				continue
 			}
-			log.Printf("*** DATA %#v", item.Data)
 			val := item.Data[source.Field]
 			if val != "" {
-				log.Printf("Fund CM value=%s", val)
 				return val, nil
 			}
 			log.Printf("Data field %s not found in the ConfigMap %s", source.Field, source.Name)
@@ -272,7 +268,6 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 // in case of the getSelector, values with empty selectorNames should be ignored
 func (att *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod) (selectorName string, fieldValue string, err error) {
 
-	log.Printf("*** identity_schema, getValueWorkloadAttestor for pod %s", pod.Name)
 	for _, field := range att.Mappings {
 
 		// only certain fields are valid as selectors, other will be ignored
@@ -285,6 +280,7 @@ func (att *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod) (select
 			return selectorName, fieldValue, err
 		// to be used by other attestor types
 		case "xxx":
+			// TODO to be removed...
 			log.Printf("*** Processing xxx attestor")
 		default:
 			err := fmt.Errorf("Unknown attestor type: %s", field.Type)
@@ -314,8 +310,6 @@ func getValueFromK8s(fieldName string, pod *corev1.Pod) (selectorName string, fi
 
 func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector {
 
-	log.Printf("*** identity_schema, getSelector :Creating Selectors for pod: %s", pod.Name)
-
 	// create default selector if no identity schema fields available
 	if is.Fields == nil {
 		newSelector := spiffeidv1beta1.Selector{
@@ -342,12 +336,16 @@ func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector 
 		if att != nil && att.Group == workloadAttestor {
 			selectorName, selectorValue, err := att.getValueFromWorkloadAttestor(pod)
 			if err != nil {
-				log.Printf("*** identity_schema, getSelector Error getting selector: %v", err)
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Errorf("Error retrieving selector value for the Field name=%s. %v", field.Name, err)
 				continue
 			}
 			// some values are not relevant to selectors, so they will be skipped
 			if selectorName == "" {
-				log.Printf("*** identity_schema, getSelector: selectorName is empty, skipping selector for value=%s", selectorValue)
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Debugf("Selector name for the Field name=%s is empty. Skiping it.", field.Name)
 				continue
 			}
 
@@ -361,7 +359,9 @@ func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector 
 			case serviceAccountLabel:
 				newSelector.ServiceAccount = selectorValue
 			default:
-				log.Printf("*** identity_schema, getSelector unknown selector %s = %s", selectorName, selectorValue)
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Errorf("Unknown selector for the Field name=%s. Selector name=%s, value=%s", field.Name, selectorName, selectorValue)
 			}
 		}
 	}

@@ -17,7 +17,6 @@ package controllers
 
 import (
 	"context"
-	"log"
 
 	"github.com/sirupsen/logrus"
 	federation "github.com/spiffe/spire/support/k8s/k8s-workload-registrar/federation"
@@ -179,7 +178,6 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 
 // podSelector returns the desired set of selectors depending whether Identity Schema is used
 func (r *PodReconciler) podSelector(ctx context.Context, pod *corev1.Pod) spiffeidv1beta1.Selector {
-	log.Printf("Pod_controller, podSelector: processing pod: %s", pod.Name)
 
 	// this is the standard selector, when not using identity schema
 	selector := spiffeidv1beta1.Selector{
@@ -206,7 +204,7 @@ func (r *PodReconciler) podSelector(ctx context.Context, pod *corev1.Pod) spiffe
 
 // podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
 func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string {
-	log.Printf("Pod_controller, podSpiffeID: processing pod: %s", pod.Name)
+
 	if r.c.PodLabel != "" {
 		// the controller has been configured with a pod label. if the pod
 		// has that label, use the value to construct the pod entry. otherwise

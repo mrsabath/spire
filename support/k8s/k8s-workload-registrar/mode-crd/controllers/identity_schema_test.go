@@ -16,7 +16,6 @@ limitations under the License.
 package controllers
 
 import (
-	"log"
 	"testing"
 
 	"github.com/spiffe/spire/support/k8s/k8s-workload-registrar/mode-crd/api/spiffeid/v1beta1"
@@ -137,8 +136,8 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 	err := s.k8sClient.Create(s.ctx, &configMap)
 	s.Require().NoError(err)
 
-	for i, test := range tests {
-		log.Printf("####### executing test %v %s", i, test.expectedSvid)
+	for _, test := range tests {
+
 		p := NewPodReconciler(PodReconcilerConfig{
 			Client:               s.k8sClient,
 			Cluster:              s.cluster,
