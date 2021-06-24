@@ -7,6 +7,7 @@ import (
 	"io/ioutil"
 	"log"
 
+	"github.com/sirupsen/logrus"
 	spiffeidv1beta1 "github.com/spiffe/spire/support/k8s/k8s-workload-registrar/mode-crd/api/spiffeid/v1beta1"
 	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
@@ -16,6 +17,8 @@ import (
 )
 
 const (
+	isConfigFileDefault = "/run/identity-schema/config/identity-schema.yaml"
+
 	// attestor variants:
 	nodeAttestor     = "nodeAttestor"
 	workloadAttestor = "workloadAttestor"
@@ -28,6 +31,7 @@ const (
 )
 
 type IdentitySchema struct {
+	Log     logrus.FieldLogger
 	Version string  `yaml:"version"`
 	Fields  []Field `yaml:"fields"`
 }
@@ -121,36 +125,56 @@ func main() {
 
 func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl client.Client) string {
 
-	log.Printf("identity_schema, getId: processing Pod %s", pod.Name)
+	// sample log format:
+	// r.c.Log.WithFields(logrus.Fields{
+	// 	"name":      spiffeID.Name,
+	// 	"namespace": spiffeID.Namespace,
+	// }).WithError(err).Error("Unable to fetch SpiffeID resource")
+	is.Log.WithFields(logrus.Fields{
+		"podName": pod.Name,
+	}).Debug("Executing getSVID")
 
 	var idString string = ""
 	fields := is.Fields
-	for i, field := range fields {
+	for _, field := range fields {
 		var val string = ""
 		if field.Name == "" {
-			log.Printf("identity_schema, getSVID. ERROR: field name must be set")
+			is.Log.WithFields(logrus.Fields{
+				"podName": pod.Name,
+			}).Error("Identity schema Field with a missing Name. All the Fields must have names set. Ignoring this field.")
 			continue
 		}
-		log.Printf("identity_schema, getId: %d Field name: %s", i, field.Name)
+		is.Log.WithFields(logrus.Fields{
+			"podName": pod.Name,
+		}).Debugf("Processing Field Name=%s", field.Name)
 
 		if field.Value != "" {
 			// field Value ovverides any value provided by other sources
-			log.Printf("identity_schema, getSVID. Value provided=%s, overriding the other sources", field.Value)
+			is.Log.WithFields(logrus.Fields{
+				"podName": pod.Name,
+			}).Infof("Field Name=%s has value provided: %s. Overriding all other sources.", field.Name, field.Value)
 			val = field.Value
 		} else {
 			var err error
 			val, err = is.getFieldValue(ctx, pod, cl, field)
 			if err != nil {
-				log.Printf("identity_schema, getId: %d Error processing field %s: %v", i, field.Name, err)
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Errorf("Error retrieving value for the Field name=%s. %v", field.Name, err)
 
 				// TODO for now, let's use the field name instead of the value
 				val = field.Name
-				log.Printf("identity_schema, getId: Using field name instead of the value: %s", field.Name)
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Infof("Temporarly assigning Field name=%v as a value for this field.", field.Name)
 			}
 		}
 		idString += "/" + val
 	}
-	log.Printf("identity_schema, getSVID: ID Value: %s", idString)
+	is.Log.WithFields(logrus.Fields{
+		"podName":  pod.Name,
+		"function": "getSVID",
+	}).Debugf("SPIFFE ID=%s", idString)
 	return idString
 }
 
@@ -343,43 +367,3 @@ func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector 
 	}
 	return newSelector
 }
-
-// func getSelectorField(pod *corev1.Pod, attestor *AttestorSource) (selectorName string, selectorValue string, err error) {
-// 	log.Printf("*** identity_schema, getSelectorField pod %s", pod.Name)
-
-// 	if attestor.Mapping == nil {
-// 		err := fmt.Errorf("Missing mapping for attestor: %s", attestor.Name)
-// 		return selectorName, selectorValue, err
-// 	}
-
-// 	// iterrate thorugh all the mapping options and find appropriate selectors
-// 	for _, field := range attestor.Mapping {
-
-// 		//log.Printf("*** %d processing field: %#v", i, field)
-
-// 		switch field.Type {
-// 		case "k8s":
-// 			switch field.Field {
-// 			case "sa":
-// 				return serviceAccountLabel, pod.Spec.ServiceAccountName, nil
-// 			case "ns":
-// 				return namespaceLabel, pod.Namespace, nil
-// 			case "pod-name":
-// 				return podNameLabel, pod.Name, nil
-// 			case "pod-uid":
-// 				return podUIDLabel, string(pod.UID), nil
-// 			default:
-// 				err := fmt.Errorf("Unknown field for k8s attestor: %s", field.Field)
-// 				log.Printf("%s", err)
-// 			}
-// 		case "xxx":
-// 			log.Printf("*** Processing xxx attestor")
-// 		default:
-// 			err := fmt.Errorf("Unknown attestor type: %s", field.Type)
-// 			log.Printf("%s", err)
-// 		}
-
-// 	}
-// 	log.Printf("No selectors found for attestor: %s", attestor.Name)
-// 	return selectorName, selectorValue, nil
-// }

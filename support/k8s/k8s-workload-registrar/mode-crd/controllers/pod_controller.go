@@ -57,18 +57,17 @@ type PodReconciler struct {
 func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 
 	// get identity schema config here, otherwise use default value
-	identitySchemaConfig := config.IdentitySchemaConfig
-	if identitySchemaConfig == "" {
-		identitySchemaConfig = "../config/identity-schema.yaml"
-		//identitySchemaConfig = "/run/identity-schema/config/identity-schema.yaml"
-		log.Printf("pod_controller, newPodReconciler: Path to the identity schema config not set. Using default: %s", identitySchemaConfig)
+	isConfigFile := config.IdentitySchemaConfig
+	if isConfigFile == "" {
+		isConfigFile = isConfigFileDefault
+		config.Log.Infof("Path to the identity schema config not set. Using default: %v", isConfigFile)
 	}
-	// exit if canfig cannot be loaded
-	//log.Printf("pod_controller, NewPodReconiler. loadConfig with %s", identitySchemaConfig)
-	idSchema, err := loadConfig(identitySchemaConfig)
+	// exit if config cannot be loaded
+	idSchema, err := loadConfig(isConfigFile)
 	if err != nil {
-		log.Fatalf("Error loading configuration for identity schema %s. Error %v", identitySchemaConfig, err)
+		config.Log.Fatalf("Error loading configuration for identity schema %s. Error %v", isConfigFile, err)
 	}
+	idSchema.Log = config.Log
 	return &PodReconciler{
 		Client: config.Client,
 		c:      config,
@@ -118,7 +117,9 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 		return ctrl.Result{}, nil
 	}
 
-	newSelector := r.is.getSelector(pod)
+	// selector set depends on the format of the SpiffeID
+	newSelector := r.podSelector(ctx, pod)
+
 	federationDomains := federation.GetFederationDomains(pod)
 
 	// Set up new SPIFFE ID
@@ -136,11 +137,6 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 			DnsNames:      []string{pod.Name}, // Set pod name as first DNS name
 			FederatesWith: federationDomains,
 			Selector:      newSelector,
-			// Selector: spiffeidv1beta1.Selector{
-			// 	PodUid:    pod.GetUID(),
-			// 	Namespace: pod.Namespace,
-			// 	NodeName:  pod.Spec.NodeName,
-			// },
 		},
 	}
 	err := setOwnerRef(pod, spiffeID, r.c.Scheme)
@@ -181,6 +177,33 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 	return ctrl.Result{}, nil
 }
 
+// podSelector returns the desired set of selectors depending whether Identity Schema is used
+func (r *PodReconciler) podSelector(ctx context.Context, pod *corev1.Pod) spiffeidv1beta1.Selector {
+	log.Printf("Pod_controller, podSelector: processing pod: %s", pod.Name)
+
+	// this is the standard selector, when not using identity schema
+	selector := spiffeidv1beta1.Selector{
+		PodUid:    pod.GetUID(),
+		Namespace: pod.Namespace,
+		NodeName:  pod.Spec.NodeName,
+	}
+
+	if r.c.PodLabel != "" {
+		// the controller has been configured with a pod label, use default selector
+		return selector
+	}
+
+	if r.c.PodAnnotation != "" {
+		// the controller has been configured with a pod annotation, use default selector
+		return selector
+	}
+
+	// the controller has not been configured with a pod label or a pod annotation.
+	// TODO setup some new variable to trigger the Identity Schema processing
+	newSelector := r.is.getSelector(pod)
+	return newSelector
+}
+
 // podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
 func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string {
 	log.Printf("Pod_controller, podSpiffeID: processing pod: %s", pod.Name)
@@ -205,16 +228,18 @@ func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string
 	}
 
 	// the controller has not been configured with a pod label or a pod annotation.
-	// create an entry based on the service account.
-	//return makeID(r.c.TrustDomain, "v1/provider/eu-de/%s/%s/%s", pod.Namespace, pod.Spec.ServiceAccountName, pod.Spec.Containers[0].Name)
 
 	// TODO setup some new variable to trigger the Identity Schema processing
+	// new format:
 	newId := r.is.getSVID(ctx, pod, r.Client)
-
 	return makeID(r.c.TrustDomain, newId)
+
+	// or old format:
+	// create an entry based on the service account.
 	// return makeID(r.c.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
 }
 
+// podParentId - handy function to create parent id:
 func (r *PodReconciler) podParentID(nodeName string) string {
 	return makeID(r.c.TrustDomain, "k8s-workload-registrar/%s/node/%s", r.c.Cluster, nodeName)
 }
