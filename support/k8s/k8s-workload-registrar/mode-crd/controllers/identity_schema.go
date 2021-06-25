@@ -43,10 +43,11 @@ type IdentitySchemaConfig struct {
 }
 
 type Field struct {
-	Name            string           `yaml:"name"`
-	Value           string           `yaml:"value,omitempty"`
-	AttestorSource  *AttestorSource  `yaml:"attestorSource,omitempty"`
-	ConfigMapSource *ConfigMapSource `yaml:"configMapSource,omitempty"`
+	Name             string                  `yaml:"name"`
+	Value            string                  `yaml:"value,omitempty"`
+	WorkloadAttestor *WorkloadAttestorSource `yaml:"workloadAttestorSource,omitempty"`
+	NodeAttestor     *WorkloadAttestorSource `yaml:"nodeAttestorSource,omitempty"`
+	ConfigMap        *ConfigMapSource        `yaml:"configMapSource,omitempty"`
 }
 
 type Source interface {
@@ -59,9 +60,13 @@ type ConfigMapSource struct {
 	Field     string `yaml:"field"`
 }
 
-type AttestorSource struct {
+type NodeAttestorSource struct {
 	Name     string    `yaml:"name"`
-	Group    string    `yaml:"group"`
+	Mappings []Mapping `yaml:"mapping"`
+}
+
+type WorkloadAttestorSource struct {
+	Name     string    `yaml:"name"`
 	Mappings []Mapping `yaml:"mapping"`
 }
 
@@ -151,8 +156,9 @@ func (is *IdentitySchemaController) getSVID(pod *corev1.Pod) string {
 func (is *IdentitySchemaController) getFieldValue(pod *corev1.Pod, field Field) (string, error) {
 
 	switch {
-	case field.AttestorSource != nil:
-		value, err := field.AttestorSource.GetValue(pod)
+	case field.WorkloadAttestor != nil:
+		// we can ignore the fieldLabel, since it's used by selectors only
+		_, value, err := field.WorkloadAttestor.getValueFromWorkloadAttestor(is.Log, pod)
 		if err != nil {
 			is.Log.WithFields(logrus.Fields{
 				"podName": pod.Name,
@@ -160,8 +166,8 @@ func (is *IdentitySchemaController) getFieldValue(pod *corev1.Pod, field Field) 
 			return field.Name, err
 		}
 		return value, nil
-	case field.ConfigMapSource != nil:
-		value, err := field.ConfigMapSource.GetValue(is.Ctx, is.Client, field.ConfigMapSource)
+	case field.ConfigMap != nil:
+		value, err := is.GetValueFromConfigMap(field.ConfigMap)
 		if err != nil {
 			is.Log.WithFields(logrus.Fields{
 				"podName": pod.Name,
@@ -175,36 +181,14 @@ func (is *IdentitySchemaController) getFieldValue(pod *corev1.Pod, field Field) 
 	}
 }
 
-func (att *AttestorSource) GetValue(pod *corev1.Pod) (value string, err error) {
-
-	switch att.Group {
-	case nodeAttestor:
-		err = fmt.Errorf("Function for %s not implemented", "nodeAttestor")
-		return "value-from-node-Attestor", err
-	case workloadAttestor:
-		// here we don't need the selector values. We just need the value for the SPIFFE ID
-		_, value, err = att.getValueFromWorkloadAttestor(pod)
-		if err != nil {
-			log.Printf("Error: %s", err)
-			return value, err
-		} else {
-			return value, nil
-		}
-	default:
-		err := fmt.Errorf("Unknown attestor name: %s", att.Group)
-		log.Printf("Error getting attestor: %v", err)
-		return value, err
-	}
-}
-
-func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, source *ConfigMapSource) (value string, err error) {
+func (is *IdentitySchemaController) GetValueFromConfigMap(configMap *ConfigMapSource) (value string, err error) {
 
 	// scope down the ConfigmMap list to the namespace provided in the configuration
 	cmlist := corev1.ConfigMapList{}
 	lopt := client.ListOptions{
-		Namespace: source.Namespace,
+		Namespace: configMap.Namespace,
 	}
-	if err := cl.List(ctx, &cmlist, &lopt); err != nil {
+	if err := is.Client.List(is.Ctx, &cmlist, &lopt); err != nil {
 		if !errors.IsNotFound(err) {
 			log.Printf("Error, unable to get ConfigMap list")
 		}
@@ -215,20 +199,20 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 	// get all the configmaps in provided namespace
 	for _, item := range cmlist.Items {
 
-		if item.Name == source.Name {
+		if item.Name == configMap.Name {
 			if item.Data == nil {
 				log.Printf("Error, missing data field in configMap with name=%s", item.Name)
 				continue
 			}
-			val := item.Data[source.Field]
+			val := item.Data[configMap.Field]
 			if val != "" {
 				return val, nil
 			}
-			log.Printf("Data field %s not found in the ConfigMap %s", source.Field, source.Name)
+			log.Printf("Data field %s not found in the ConfigMap %s", configMap.Field, configMap.Name)
 		}
 
 	}
-	err = fmt.Errorf("No configMap with Name=%s in namespace %s found ", source.Name, source.Namespace)
+	err = fmt.Errorf("No configMap with Name=%s in namespace %s found ", configMap.Name, configMap.Namespace)
 	log.Printf("Error: %#v", err)
 	return value, err
 }
@@ -236,18 +220,19 @@ func (cms *ConfigMapSource) GetValue(ctx context.Context, cl client.Client, sour
 // getValueFromWorkloadAttestor is a function used by both getSVID and getSelector
 // in case of the getSVID, the selectorName should be ignored
 // in case of the getSelector, values with empty selectorNames should be ignored
-func (att *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod) (selectorName string, fieldValue string, err error) {
+func (watt *WorkloadAttestorSource) getValueFromWorkloadAttestor(log logrus.FieldLogger, pod *corev1.Pod) (fieldLabel string, fieldValue string, err error) {
 
-	for _, field := range att.Mappings {
+	for _, field := range watt.Mappings {
 
 		// only certain fields are valid as selectors, other will be ignored
 		switch field.Type {
 		case "k8s":
-			selectorName, fieldValue, err = getValueFromK8s(field.Field, pod)
+			// here we don't need the fieldLabel, since it's used only by selectors
+			fieldLabel, fieldValue, err = watt.getValueFromK8s(field.Field, pod)
 			if err != nil {
 				log.Printf("Error retrieving k8s values for field=%s: %v", field.Field, err)
 			}
-			return selectorName, fieldValue, err
+			return fieldLabel, fieldValue, err
 		// to be used by other attestor types
 		case "xxx":
 			// TODO to be removed...
@@ -257,11 +242,11 @@ func (att *AttestorSource) getValueFromWorkloadAttestor(pod *corev1.Pod) (select
 			log.Printf("%s", err)
 		}
 	}
-	return selectorName, fieldValue, fmt.Errorf("Cannot find a mapping match. Error: %s", err)
+	return fieldLabel, fieldValue, fmt.Errorf("Cannot find a mapping match. Error: %s", err)
 }
 
 // getValueFromK8s - helper function to process values from K8s:
-func getValueFromK8s(fieldName string, pod *corev1.Pod) (selectorName string, fieldValue string, err error) {
+func (watt *WorkloadAttestorSource) getValueFromK8s(fieldName string, pod *corev1.Pod) (selectorName string, fieldValue string, err error) {
 	switch fieldName {
 	case "sa":
 		return serviceAccountLabel, pod.Spec.ServiceAccountName, nil
@@ -301,10 +286,10 @@ func (is *IdentitySchemaController) getSelector(pod *corev1.Pod) spiffeidv1beta1
 	// iterrate through all the available fields and find the ones that are selector relevant:
 	for _, field := range is.Config.Fields {
 
-		att := field.AttestorSource
+		watt := field.WorkloadAttestor
 		// Selectors are only relevant for workloadAttestor
-		if att != nil && att.Group == workloadAttestor {
-			selectorName, selectorValue, err := att.getValueFromWorkloadAttestor(pod)
+		if watt != nil {
+			selectorName, selectorValue, err := watt.getValueFromWorkloadAttestor(is.Log, pod)
 			if err != nil {
 				is.Log.WithFields(logrus.Fields{
 					"podName": pod.Name,

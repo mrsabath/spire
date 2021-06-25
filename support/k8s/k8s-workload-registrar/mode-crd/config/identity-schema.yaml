@@ -8,23 +8,20 @@ fields:
       name: cluster-info
       field: cluster-region
   - name: workload-namespace
-    attestorSource:
+    workloadAttestorSource:
       name: workloadAttestor
-      group: workloadAttestor
       mapping:
       - type: k8s
         field: ns
   - name: workload-serviceAccount
-    attestorSource:
+    workloadAttestorSource:
       name: workloadAttestor
-      group: workloadAttestor
       mapping:
       - type: k8s
         field: sa
   - name: workload-podname
-    attestorSource:
+    workloadAttestorSource:
       name: workloadAttestor
-      group: workloadAttestor
       mapping:
       - type: k8s
         field: pod-name
