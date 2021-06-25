@@ -30,8 +30,14 @@ const (
 	serviceAccountLabel = "ServiceAccount"
 )
 
-type IdentitySchema struct {
-	Log     logrus.FieldLogger
+type IdentitySchemaController struct {
+	Client client.Client
+	Ctx    context.Context
+	Log    logrus.FieldLogger
+	Config IdentitySchemaConfig
+}
+
+type IdentitySchemaConfig struct {
 	Version string  `yaml:"version"`
 	Fields  []Field `yaml:"fields"`
 }
@@ -64,9 +70,19 @@ type Mapping struct {
 	Field string `yaml:"field"`
 }
 
-func loadConfig(fileName string) (*IdentitySchema, error) {
+func NewIdentitySchemaController(client client.Client, ctx context.Context, log logrus.FieldLogger, config IdentitySchemaConfig) *IdentitySchemaController {
 
-	is := IdentitySchema{}
+	return &IdentitySchemaController{
+		Client: client,
+		Ctx:    ctx,
+		Log:    log,
+		Config: config,
+	}
+}
+
+func loadConfig(fileName string) (*IdentitySchemaConfig, error) {
+
+	is := IdentitySchemaConfig{}
 	yamlFile, err := ioutil.ReadFile(fileName)
 	if err != nil {
 		log.Printf("identity_schema, loadConfig: Error reading yaml file %s:  %v ", fileName, err)
@@ -82,14 +98,14 @@ func loadConfig(fileName string) (*IdentitySchema, error) {
 	return &is, nil
 }
 
-func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl client.Client) string {
+func (is *IdentitySchemaController) getSVID(pod *corev1.Pod) string {
 
 	is.Log.WithFields(logrus.Fields{
 		"podName": pod.Name,
 	}).Debug("Executing getSVID")
 
 	var idString string = ""
-	fields := is.Fields
+	fields := is.Config.Fields
 	for _, field := range fields {
 		var val string = ""
 		if field.Name == "" {
@@ -110,7 +126,7 @@ func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl clien
 			val = field.Value
 		} else {
 			var err error
-			val, err = is.getFieldValue(ctx, pod, cl, field)
+			val, err = is.getFieldValue(pod, field)
 			if err != nil {
 				is.Log.WithFields(logrus.Fields{
 					"podName": pod.Name,
@@ -132,7 +148,7 @@ func (is *IdentitySchema) getSVID(ctx context.Context, pod *corev1.Pod, cl clien
 	return idString
 }
 
-func (is *IdentitySchema) getFieldValue(ctx context.Context, pod *corev1.Pod, cl client.Client, field Field) (string, error) {
+func (is *IdentitySchemaController) getFieldValue(pod *corev1.Pod, field Field) (string, error) {
 
 	switch {
 	case field.AttestorSource != nil:
@@ -145,7 +161,7 @@ func (is *IdentitySchema) getFieldValue(ctx context.Context, pod *corev1.Pod, cl
 		}
 		return value, nil
 	case field.ConfigMapSource != nil:
-		value, err := field.ConfigMapSource.GetValue(ctx, cl, field.ConfigMapSource)
+		value, err := field.ConfigMapSource.GetValue(is.Ctx, is.Client, field.ConfigMapSource)
 		if err != nil {
 			is.Log.WithFields(logrus.Fields{
 				"podName": pod.Name,
@@ -262,10 +278,10 @@ func getValueFromK8s(fieldName string, pod *corev1.Pod) (selectorName string, fi
 	}
 }
 
-func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector {
+func (is *IdentitySchemaController) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector {
 
 	// create default selector if no identity schema fields available
-	if is.Fields == nil {
+	if is.Config.Fields == nil {
 		newSelector := spiffeidv1beta1.Selector{
 			PodUid:    pod.GetUID(),
 			Namespace: pod.Namespace,
@@ -283,7 +299,7 @@ func (is *IdentitySchema) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector 
 	}
 
 	// iterrate through all the available fields and find the ones that are selector relevant:
-	for _, field := range is.Fields {
+	for _, field := range is.Config.Fields {
 
 		att := field.AttestorSource
 		// Selectors are only relevant for workloadAttestor

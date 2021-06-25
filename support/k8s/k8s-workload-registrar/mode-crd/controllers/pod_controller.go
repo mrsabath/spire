@@ -33,44 +33,43 @@ import (
 
 // PodReconcilerConfig holds the config passed in when creating the reconciler
 type PodReconcilerConfig struct {
-	Client               client.Client
-	Cluster              string
-	Ctx                  context.Context
-	DisabledNamespaces   []string
-	Log                  logrus.FieldLogger
-	PodLabel             string
-	PodAnnotation        string
-	Scheme               *runtime.Scheme
-	TrustDomain          string
-	IdentitySchemaConfig string
+	Client                   client.Client
+	Cluster                  string
+	Ctx                      context.Context
+	DisabledNamespaces       []string
+	Log                      logrus.FieldLogger
+	PodLabel                 string
+	PodAnnotation            string
+	Scheme                   *runtime.Scheme
+	TrustDomain              string
+	IdentitySchemaConfigFile string
 }
 
 // PodReconciler holds the runtime configuration and state of this controller
 type PodReconciler struct {
 	client.Client
-	c  PodReconcilerConfig
-	is IdentitySchema
+	c        PodReconcilerConfig
+	isConfig IdentitySchemaConfig
 }
 
 // NewPodReconciler creates a new PodReconciler object
 func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
 
 	// get identity schema config here, otherwise use default value
-	isConfigFile := config.IdentitySchemaConfig
+	isConfigFile := config.IdentitySchemaConfigFile
 	if isConfigFile == "" {
 		isConfigFile = isConfigFileDefault
 		config.Log.Infof("Path to the identity schema config not set. Using default: %v", isConfigFile)
 	}
 	// exit if config cannot be loaded
-	idSchema, err := loadConfig(isConfigFile)
+	idSchemaConfig, err := loadConfig(isConfigFile)
 	if err != nil {
 		config.Log.Fatalf("Error loading configuration for identity schema %s. Error %v", isConfigFile, err)
 	}
-	idSchema.Log = config.Log
 	return &PodReconciler{
-		Client: config.Client,
-		c:      config,
-		is:     *idSchema,
+		Client:   config.Client,
+		c:        config,
+		isConfig: *idSchemaConfig,
 	}
 }
 
@@ -198,7 +197,7 @@ func (r *PodReconciler) podSelector(ctx context.Context, pod *corev1.Pod) spiffe
 
 	// the controller has not been configured with a pod label or a pod annotation.
 	// TODO setup some new variable to trigger the Identity Schema processing
-	newSelector := r.is.getSelector(pod)
+	newSelector := NewIdentitySchemaController(r.Client, ctx, r.c.Log, r.isConfig).getSelector(pod)
 	return newSelector
 }
 
@@ -229,8 +228,8 @@ func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string
 
 	// TODO setup some new variable to trigger the Identity Schema processing
 	// new format:
-	newId := r.is.getSVID(ctx, pod, r.Client)
-	return makeID(r.c.TrustDomain, newId)
+	newSVID := NewIdentitySchemaController(r.Client, ctx, r.c.Log, r.isConfig).getSVID(pod)
+	return makeID(r.c.TrustDomain, newSVID)
 
 	// or old format:
 	// create an entry based on the service account.

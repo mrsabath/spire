@@ -139,15 +139,15 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 	for _, test := range tests {
 
 		p := NewPodReconciler(PodReconcilerConfig{
-			Client:               s.k8sClient,
-			Cluster:              s.cluster,
-			Ctx:                  s.ctx,
-			Log:                  s.log,
-			PodLabel:             test.podLabel,
-			PodAnnotation:        test.podAnnotation,
-			Scheme:               s.scheme,
-			TrustDomain:          s.trustDomain,
-			IdentitySchemaConfig: isConfigFileTest,
+			Client:                   s.k8sClient,
+			Cluster:                  s.cluster,
+			Ctx:                      s.ctx,
+			Log:                      s.log,
+			PodLabel:                 test.podLabel,
+			PodAnnotation:            test.podAnnotation,
+			Scheme:                   s.scheme,
+			TrustDomain:              s.trustDomain,
+			IdentitySchemaConfigFile: isConfigFileTest,
 		})
 
 		pod := corev1.Pod{
