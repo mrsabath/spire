@@ -103,7 +103,21 @@ func loadConfig(fileName string) (*IdentitySchemaConfig, error) {
 	return &is, nil
 }
 
-func (is *IdentitySchemaController) getSVID(pod *corev1.Pod) string {
+func (is *IdentitySchemaController) getIdentityFormat(pod *corev1.Pod) (spiffeidv1beta1.Selector, string) {
+
+	// create default selector if no identity schema fields available
+	if is.Config.Fields == nil {
+		newSelector := spiffeidv1beta1.Selector{}
+		return newSelector, ""
+	}
+
+	// create a new Selector object
+	// always assign the NodeName value
+	newSelector := spiffeidv1beta1.Selector{
+		//PodUid:    pod.GetUID(),
+		//Namespace: pod.Namespace,
+		NodeName: pod.Spec.NodeName,
+	}
 
 	is.Log.WithFields(logrus.Fields{
 		"podName": pod.Name,
@@ -113,6 +127,8 @@ func (is *IdentitySchemaController) getSVID(pod *corev1.Pod) string {
 	fields := is.Config.Fields
 	for _, field := range fields {
 		var val string = ""
+		var name string = ""
+		var err error
 		if field.Name == "" {
 			is.Log.WithFields(logrus.Fields{
 				"podName": pod.Name,
@@ -130,18 +146,38 @@ func (is *IdentitySchemaController) getSVID(pod *corev1.Pod) string {
 			}).Infof("Field Name=%s has value provided: %s. Overriding all other sources.", field.Name, field.Value)
 			val = field.Value
 		} else {
-			var err error
-			val, err = is.getFieldValue(pod, field)
+			name, val, err = is.getFieldInfo(pod, field)
 			if err != nil {
 				is.Log.WithFields(logrus.Fields{
 					"podName": pod.Name,
 				}).Errorf("Error retrieving value for the Field name=%s. %v", field.Name, err)
 
-				// TODO for now, let's use the field name instead of the value
+				// TODO for now, let's use the field name instead of the value, if not implemented or error
 				val = field.Name
 				is.Log.WithFields(logrus.Fields{
 					"podName": pod.Name,
 				}).Infof("Temporarly assigning Field name=%v as a value for this field.", field.Name)
+			}
+
+			// process selectors:
+			switch name {
+			case namespaceLabel:
+				newSelector.Namespace = val
+			case podUIDLabel:
+				newSelector.PodUid = types.UID(val)
+			case podNameLabel:
+				newSelector.PodName = val
+			case serviceAccountLabel:
+				newSelector.ServiceAccount = val
+			case "":
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Infof("Empty selector for Field name=%s. Skipping it", field.Name)
+
+			default:
+				is.Log.WithFields(logrus.Fields{
+					"podName": pod.Name,
+				}).Errorf("Unknown selector for the Field name=%s. Selector name=%s, value=%s", field.Name, name, val)
 			}
 		}
 		idString += "/" + val
@@ -150,34 +186,40 @@ func (is *IdentitySchemaController) getSVID(pod *corev1.Pod) string {
 		"podName":  pod.Name,
 		"function": "getSVID",
 	}).Debugf("SPIFFE ID=%s", idString)
-	return idString
+	log.Printf("")
+	return newSelector, idString
 }
 
-func (is *IdentitySchemaController) getFieldValue(pod *corev1.Pod, field Field) (string, error) {
+// getFieldInfo returns field name (used for selectors, might be empty if not applicable) and field value for SVID
+func (is *IdentitySchemaController) getFieldInfo(pod *corev1.Pod, field Field) (name string, value string, err error) {
 
+	// apply different functions based on field type:
 	switch {
 	case field.WorkloadAttestor != nil:
 		// we can ignore the fieldLabel, since it's used by selectors only
-		_, value, err := field.WorkloadAttestor.getValueFromWorkloadAttestor(is.Log, pod)
+		name, value, err := field.WorkloadAttestor.getValueFromWorkloadAttestor(is.Log, pod)
 		if err != nil {
 			is.Log.WithFields(logrus.Fields{
 				"podName": pod.Name,
 			}).Errorf("Error processing the attestor source field=%s: %v", field.Name, err)
-			return field.Name, err
+			return "", field.Name, err
 		}
-		return value, nil
+		return name, value, nil
 	case field.ConfigMap != nil:
 		value, err := is.GetValueFromConfigMap(field.ConfigMap)
 		if err != nil {
 			is.Log.WithFields(logrus.Fields{
 				"podName": pod.Name,
 			}).Errorf("Error processing the configmMap source field=%s: %v", field.Name, err)
-			return field.Name, err
+			return "", field.Name, err
 		}
-		return value, nil
+		return "", value, nil
+	case field.NodeAttestor != nil:
+		err := fmt.Errorf("NodeAttestor for a field %s is not implemented yet", field.Name)
+		return "", field.Name, err
 	default:
 		err := fmt.Errorf("Unknown or missing source for field: %s", field.Name)
-		return field.Name, err
+		return "", field.Name, err
 	}
 }
 
@@ -261,64 +303,4 @@ func (watt *WorkloadAttestorSource) getValueFromK8s(fieldName string, pod *corev
 		log.Printf("%s", err)
 		return selectorName, fieldValue, err
 	}
-}
-
-func (is *IdentitySchemaController) getSelector(pod *corev1.Pod) spiffeidv1beta1.Selector {
-
-	// create default selector if no identity schema fields available
-	if is.Config.Fields == nil {
-		newSelector := spiffeidv1beta1.Selector{
-			PodUid:    pod.GetUID(),
-			Namespace: pod.Namespace,
-			NodeName:  pod.Spec.NodeName,
-		}
-		return newSelector
-	}
-
-	// create a new Selector object
-	// always assign the NodeName value
-	newSelector := spiffeidv1beta1.Selector{
-		//PodUid:    pod.GetUID(),
-		//Namespace: pod.Namespace,
-		NodeName: pod.Spec.NodeName,
-	}
-
-	// iterrate through all the available fields and find the ones that are selector relevant:
-	for _, field := range is.Config.Fields {
-
-		watt := field.WorkloadAttestor
-		// Selectors are only relevant for workloadAttestor
-		if watt != nil {
-			selectorName, selectorValue, err := watt.getValueFromWorkloadAttestor(is.Log, pod)
-			if err != nil {
-				is.Log.WithFields(logrus.Fields{
-					"podName": pod.Name,
-				}).Errorf("Error retrieving selector value for the Field name=%s. %v", field.Name, err)
-				continue
-			}
-			// some values are not relevant to selectors, so they will be skipped
-			if selectorName == "" {
-				is.Log.WithFields(logrus.Fields{
-					"podName": pod.Name,
-				}).Debugf("Selector name for the Field name=%s is empty. Skiping it.", field.Name)
-				continue
-			}
-
-			switch selectorName {
-			case namespaceLabel:
-				newSelector.Namespace = selectorValue
-			case podUIDLabel:
-				newSelector.PodUid = types.UID(selectorValue)
-			case podNameLabel:
-				newSelector.PodName = selectorValue
-			case serviceAccountLabel:
-				newSelector.ServiceAccount = selectorValue
-			default:
-				is.Log.WithFields(logrus.Fields{
-					"podName": pod.Name,
-				}).Errorf("Unknown selector for the Field name=%s. Selector name=%s, value=%s", field.Name, selectorName, selectorValue)
-			}
-		}
-	}
-	return newSelector
 }

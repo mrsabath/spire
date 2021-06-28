@@ -171,10 +171,11 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		s.Require().NoError(err)
 		s.reconcile(p, test.podName, test.podNamespace)
 
-		// check format created by Identity Schema:
-		actualSvid := p.podSpiffeID(s.ctx, &pod)
+		// check format created by Identity Schema, for both selectors and SVID:
+		actualSelector, actualSvid := p.podSpiffeID(s.ctx, &pod)
 		expectedSvid := makeID(s.trustDomain, test.expectedSvid)
 		s.Require().Equal(expectedSvid, actualSvid)
+		s.Require().Equal(test.expectedSelector, actualSelector)
 
 		// create a label selector to correlate pods with CRs:
 		labelSelector := labels.Set(map[string]string{
@@ -188,8 +189,9 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		s.Require().NoError(err)
 		s.Require().Len(spiffeIDList.Items, 1)
 
+		// check the selectors defined on SpiffeId object:
 		// since we expect only one SpiffeId object on the list, it's safe to use the first one:
-		actualSelector := spiffeIDList.Items[0].Spec.Selector
+		actualSelector = spiffeIDList.Items[0].Spec.Selector
 		s.Require().Equal(test.expectedSelector, actualSelector)
 
 		// validate SPIFFE ID format in CR:
