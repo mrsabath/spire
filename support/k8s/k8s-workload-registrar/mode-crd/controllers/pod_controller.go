@@ -109,7 +109,7 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 // updateorCreatePodEntry attempts to create a new SpiffeID resource.
 func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.Pod) (ctrl.Result, error) {
 
-	newSelector, spiffeIDURI := r.podSpiffeID(ctx, pod)
+	spiffeIDURI := r.podSpiffeID(ctx, pod)
 	// If we have no spiffe ID for the pod, do nothing
 	if spiffeIDURI == "" {
 		return ctrl.Result{}, nil
@@ -131,7 +131,11 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 			ParentId:      r.podParentID(pod.Spec.NodeName),
 			DnsNames:      []string{pod.Name}, // Set pod name as first DNS name
 			FederatesWith: federationDomains,
-			Selector:      newSelector,
+			Selector: spiffeidv1beta1.Selector{
+				PodUid:    pod.GetUID(),
+				Namespace: pod.Namespace,
+				NodeName:  pod.Spec.NodeName,
+			},
 		},
 	}
 	err := setOwnerRef(pod, spiffeID, r.c.Scheme)
@@ -172,23 +176,17 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 	return ctrl.Result{}, nil
 }
 
-// podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored, and correspoding selectors
-func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) (spiffeidv1beta1.Selector, string) {
-	// this is the standard selector, when not using identity schema
-	selector := spiffeidv1beta1.Selector{
-		PodUid:    pod.GetUID(),
-		Namespace: pod.Namespace,
-		NodeName:  pod.Spec.NodeName,
-	}
+// podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
+func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string {
 
 	if r.c.PodLabel != "" {
 		// the controller has been configured with a pod label. if the pod
 		// has that label, use the value to construct the pod entry. otherwise
 		// ignore the pod altogether.
 		if labelValue, ok := pod.Labels[r.c.PodLabel]; ok {
-			return selector, makeID(r.c.TrustDomain, "%s", labelValue)
+			return makeID(r.c.TrustDomain, "%s", labelValue)
 		}
-		return selector, ""
+		return ""
 	}
 
 	if r.c.PodAnnotation != "" {
@@ -196,24 +194,19 @@ func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) (spiff
 		// has that annotation, use the value to construct the pod entry. otherwise
 		// ignore the pod altogether.
 		if annotationValue, ok := pod.Annotations[r.c.PodAnnotation]; ok {
-			return selector, makeID(r.c.TrustDomain, "%s", annotationValue)
+			return makeID(r.c.TrustDomain, "%s", annotationValue)
 		}
-		return selector, ""
+		return ""
 	}
 
 	// the controller has not been configured with a pod label or a pod annotation.
-
-	// TODO setup some new variable to trigger the Identity Schema processing
-	// new format:
-	selector, newSVID := NewIdentitySchemaController(r.Client, ctx, r.c.Log, r.isConfig).getIdentityFormat(pod)
-	return selector, makeID(r.c.TrustDomain, newSVID)
-
-	// or old format:
-	// create an entry based on the service account.
-	// return makeID(r.c.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
+	// Get a new SVID format:
+	is := NewIdentitySchemaController(r.Client, ctx, r.c.Log, r.isConfig)
+	newSVID := is.getIdentityFormat(pod)
+	return makeID(r.c.TrustDomain, newSVID)
 }
 
-// podParentId - handy function to create parent id:
+// podParentID - a handy function to create parent id:
 func (r *PodReconciler) podParentID(nodeName string) string {
 	return makeID(r.c.TrustDomain, "k8s-workload-registrar/%s/node/%s", r.c.Cluster, nodeName)
 }

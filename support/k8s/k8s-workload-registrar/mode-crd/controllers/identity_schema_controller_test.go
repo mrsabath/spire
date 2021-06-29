@@ -65,48 +65,44 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 			// simple, default identity, without the schema
 			// using pod label
 			podName:      "test-label",
-			podNamespace: "default",
+			podNamespace: PodNamespace,
 			podLabel:     "spiffe",
 			sa:           "default",
 			uid:          "123",
 			first:        "test-label",
-			//second:       "new-test-label",
-
 			expectedSvid: "test-label",
 			expectedSelector: v1beta1.Selector{
 				PodUid:    "123",
-				Namespace: "default",
-				NodeName:  "test-node",
+				Namespace: PodNamespace,
+				NodeName:  NodeName,
 			},
 		},
 		{
 			// simple, default identity, without the schema
 			// using pod annotation
 			podName:       "test-annotation",
-			podNamespace:  "default",
+			podNamespace:  PodNamespace,
 			podAnnotation: "spiffe",
 			first:         "test-annotation",
-			//second:        "new-test-annotation",
-			expectedSvid: "test-annotation",
-			uid:          "456",
+			expectedSvid:  "test-annotation",
+			uid:           "456",
 			expectedSelector: v1beta1.Selector{
 				PodUid:    "456",
-				Namespace: "default",
+				Namespace: PodNamespace,
 				NodeName:  NodeName,
 			},
 		},
 		{
 			// using default identity schema with default namespace and default serviceAccount
 			podName:      "test-id-schema",
-			podNamespace: "default",
+			podNamespace: PodNamespace,
 			sa:           "default",
 			expectedSvid: "minikube/eu-de/default/default/test-id-schema",
 			uid:          "789",
 			expectedSelector: v1beta1.Selector{
-				PodName:        "test-id-schema",
-				Namespace:      "default",
-				ServiceAccount: "default",
-				NodeName:       NodeName,
+				PodUid:    "789",
+				Namespace: PodNamespace,
+				NodeName:  NodeName,
 			},
 		},
 		{
@@ -117,10 +113,9 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 			expectedSvid: "minikube/eu-de/testns/testsa/test-id-schema",
 			uid:          "012",
 			expectedSelector: v1beta1.Selector{
-				PodName:        "test-id-schema",
-				Namespace:      "testns",
-				ServiceAccount: "testsa",
-				NodeName:       NodeName,
+				PodUid:    "012",
+				Namespace: "testns",
+				NodeName:  NodeName,
 			},
 		},
 	}
@@ -172,10 +167,9 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 		s.reconcile(p, test.podName, test.podNamespace)
 
 		// check format created by Identity Schema, for both selectors and SVID:
-		actualSelector, actualSvid := p.podSpiffeID(s.ctx, &pod)
+		actualSvid := p.podSpiffeID(s.ctx, &pod)
 		expectedSvid := makeID(s.trustDomain, test.expectedSvid)
 		s.Require().Equal(expectedSvid, actualSvid)
-		s.Require().Equal(test.expectedSelector, actualSelector)
 
 		// create a label selector to correlate pods with CRs:
 		labelSelector := labels.Set(map[string]string{
@@ -191,7 +185,7 @@ func (s *IdentitySchemaTestSuite) TestIdentitySchema() {
 
 		// check the selectors defined on SpiffeId object:
 		// since we expect only one SpiffeId object on the list, it's safe to use the first one:
-		actualSelector = spiffeIDList.Items[0].Spec.Selector
+		actualSelector := spiffeIDList.Items[0].Spec.Selector
 		s.Require().Equal(test.expectedSelector, actualSelector)
 
 		// validate SPIFFE ID format in CR:

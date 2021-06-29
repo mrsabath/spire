@@ -30,6 +30,11 @@ const (
 	serviceAccountLabel = "ServiceAccount"
 )
 
+type SelectorInfo struct {
+	selectorName  string
+	selectorValue string
+}
+
 type IdentitySchemaController struct {
 	Client client.Client
 	Ctx    context.Context
@@ -103,31 +108,23 @@ func loadConfig(fileName string) (*IdentitySchemaConfig, error) {
 	return &is, nil
 }
 
-func (is *IdentitySchemaController) getIdentityFormat(pod *corev1.Pod) (spiffeidv1beta1.Selector, string) {
+func (is *IdentitySchemaController) getIdentityFormat(pod *corev1.Pod) string {
+
+	var idString string = ""
 
 	// create default selector if no identity schema fields available
 	if is.Config.Fields == nil {
-		newSelector := spiffeidv1beta1.Selector{}
-		return newSelector, ""
-	}
-
-	// create a new Selector object
-	// always assign the NodeName value
-	newSelector := spiffeidv1beta1.Selector{
-		//PodUid:    pod.GetUID(),
-		//Namespace: pod.Namespace,
-		NodeName: pod.Spec.NodeName,
+		//newSelector := spiffeidv1beta1.Selector{}
+		return ""
 	}
 
 	is.Log.WithFields(logrus.Fields{
 		"podName": pod.Name,
 	}).Debug("Executing getSVID")
 
-	var idString string = ""
 	fields := is.Config.Fields
 	for _, field := range fields {
 		var val string = ""
-		var name string = ""
 		var err error
 		if field.Name == "" {
 			is.Log.WithFields(logrus.Fields{
@@ -146,7 +143,7 @@ func (is *IdentitySchemaController) getIdentityFormat(pod *corev1.Pod) (spiffeid
 			}).Infof("Field Name=%s has value provided: %s. Overriding all other sources.", field.Name, field.Value)
 			val = field.Value
 		} else {
-			name, val, err = is.getFieldInfo(pod, field)
+			_, val, err = is.getFieldInfo(pod, field)
 			if err != nil {
 				is.Log.WithFields(logrus.Fields{
 					"podName": pod.Name,
@@ -158,27 +155,6 @@ func (is *IdentitySchemaController) getIdentityFormat(pod *corev1.Pod) (spiffeid
 					"podName": pod.Name,
 				}).Infof("Temporarly assigning Field name=%v as a value for this field.", field.Name)
 			}
-
-			// process selectors:
-			switch name {
-			case namespaceLabel:
-				newSelector.Namespace = val
-			case podUIDLabel:
-				newSelector.PodUid = types.UID(val)
-			case podNameLabel:
-				newSelector.PodName = val
-			case serviceAccountLabel:
-				newSelector.ServiceAccount = val
-			case "":
-				is.Log.WithFields(logrus.Fields{
-					"podName": pod.Name,
-				}).Infof("Empty selector for Field name=%s. Skipping it", field.Name)
-
-			default:
-				is.Log.WithFields(logrus.Fields{
-					"podName": pod.Name,
-				}).Errorf("Unknown selector for the Field name=%s. Selector name=%s, value=%s", field.Name, name, val)
-			}
 		}
 		idString += "/" + val
 	}
@@ -187,7 +163,7 @@ func (is *IdentitySchemaController) getIdentityFormat(pod *corev1.Pod) (spiffeid
 		"function": "getSVID",
 	}).Debugf("SPIFFE ID=%s", idString)
 	log.Printf("")
-	return newSelector, idString
+	return idString
 }
 
 // getFieldInfo returns field name (used for selectors, might be empty if not applicable) and field value for SVID
@@ -303,4 +279,28 @@ func (watt *WorkloadAttestorSource) getValueFromK8s(fieldName string, pod *corev
 		log.Printf("%s", err)
 		return selectorName, fieldValue, err
 	}
+}
+
+// applySelectors updates the given
+func (is *IdentitySchemaController) applySelectors(selector *spiffeidv1beta1.Selector, si []SelectorInfo) {
+	for _, s := range si {
+
+		// process selectors:
+		switch s.selectorName {
+		case namespaceLabel:
+			selector.Namespace = s.selectorValue
+		case podUIDLabel:
+			selector.PodUid = types.UID(s.selectorValue)
+		case podNameLabel:
+			selector.PodName = s.selectorValue
+		case serviceAccountLabel:
+			selector.ServiceAccount = s.selectorValue
+		case "":
+			is.Log.WithFields(logrus.Fields{}).Infof("Empty selector with value %s", s.selectorValue)
+
+		default:
+			is.Log.WithFields(logrus.Fields{}).Errorf("Unknown selector name=%s, value=%s", s.selectorName, s.selectorValue)
+		}
+	}
+
 }
