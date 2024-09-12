@@ -70,14 +70,15 @@ func (s *PodControllerTestSuite) TestPodLabel() {
 
 	for _, test := range tests {
 		p := NewPodReconciler(PodReconcilerConfig{
-			Client:        s.k8sClient,
-			Cluster:       s.cluster,
-			Ctx:           s.ctx,
-			Log:           s.log,
-			PodLabel:      test.PodLabel,
-			PodAnnotation: test.PodAnnotation,
-			Scheme:        s.scheme,
-			TrustDomain:   s.trustDomain,
+			Client:                   s.k8sClient,
+			Cluster:                  s.cluster,
+			Ctx:                      s.ctx,
+			Log:                      s.log,
+			PodLabel:                 test.PodLabel,
+			PodAnnotation:            test.PodAnnotation,
+			Scheme:                   s.scheme,
+			TrustDomain:              s.trustDomain,
+			IdentitySchemaConfigFile: isConfigFileTest,
 		})
 
 		pod := corev1.Pod{

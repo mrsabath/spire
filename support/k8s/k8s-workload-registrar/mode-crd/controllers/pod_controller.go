@@ -33,28 +33,43 @@ import (
 
 // PodReconcilerConfig holds the config passed in when creating the reconciler
 type PodReconcilerConfig struct {
-	Client             client.Client
-	Cluster            string
-	Ctx                context.Context
-	DisabledNamespaces []string
-	Log                logrus.FieldLogger
-	PodLabel           string
-	PodAnnotation      string
-	Scheme             *runtime.Scheme
-	TrustDomain        string
+	Client                   client.Client
+	Cluster                  string
+	Ctx                      context.Context
+	DisabledNamespaces       []string
+	Log                      logrus.FieldLogger
+	PodLabel                 string
+	PodAnnotation            string
+	Scheme                   *runtime.Scheme
+	TrustDomain              string
+	IdentitySchemaConfigFile string
 }
 
 // PodReconciler holds the runtime configuration and state of this controller
 type PodReconciler struct {
 	client.Client
-	c PodReconcilerConfig
+	c        PodReconcilerConfig
+	isConfig IdentitySchemaConfig
 }
 
 // NewPodReconciler creates a new PodReconciler object
 func NewPodReconciler(config PodReconcilerConfig) *PodReconciler {
+
+	// get identity schema config here, otherwise use default value
+	isConfigFile := config.IdentitySchemaConfigFile
+	if isConfigFile == "" {
+		isConfigFile = isConfigFileDefault
+		config.Log.Infof("Path to the identity schema config not set. Using default: %v", isConfigFile)
+	}
+	// exit if config cannot be loaded
+	idSchemaConfig, err := loadConfig(isConfigFile)
+	if err != nil {
+		config.Log.Fatalf("Error loading configuration for identity schema %s. Error %v", isConfigFile, err)
+	}
 	return &PodReconciler{
-		Client: config.Client,
-		c:      config,
+		Client:   config.Client,
+		c:        config,
+		isConfig: *idSchemaConfig,
 	}
 }
 
@@ -93,7 +108,8 @@ func (r *PodReconciler) Reconcile(req ctrl.Request) (ctrl.Result, error) {
 
 // updateorCreatePodEntry attempts to create a new SpiffeID resource.
 func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.Pod) (ctrl.Result, error) {
-	spiffeIDURI := r.podSpiffeID(pod)
+
+	spiffeIDURI := r.podSpiffeID(ctx, pod)
 	// If we have no spiffe ID for the pod, do nothing
 	if spiffeIDURI == "" {
 		return ctrl.Result{}, nil
@@ -161,7 +177,8 @@ func (r *PodReconciler) updateorCreatePodEntry(ctx context.Context, pod *corev1.
 }
 
 // podSpiffeID returns the desired spiffe ID for the pod, or nil if it should be ignored
-func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
+func (r *PodReconciler) podSpiffeID(ctx context.Context, pod *corev1.Pod) string {
+
 	if r.c.PodLabel != "" {
 		// the controller has been configured with a pod label. if the pod
 		// has that label, use the value to construct the pod entry. otherwise
@@ -183,10 +200,13 @@ func (r *PodReconciler) podSpiffeID(pod *corev1.Pod) string {
 	}
 
 	// the controller has not been configured with a pod label or a pod annotation.
-	// create an entry based on the service account.
-	return makeID(r.c.TrustDomain, "ns/%s/sa/%s", pod.Namespace, pod.Spec.ServiceAccountName)
+	// Get a new SVID format:
+	is := NewIdentitySchemaController(r.Client, ctx, r.c.Log, r.isConfig)
+	newSVID := is.getIdentityFormat(pod)
+	return makeID(r.c.TrustDomain, newSVID)
 }
 
+// podParentID - a handy function to create parent id:
 func (r *PodReconciler) podParentID(nodeName string) string {
 	return makeID(r.c.TrustDomain, "k8s-workload-registrar/%s/node/%s", r.c.Cluster, nodeName)
 }

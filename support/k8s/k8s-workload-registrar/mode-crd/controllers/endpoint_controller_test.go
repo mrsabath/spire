@@ -46,13 +46,14 @@ func (s *EndpointControllerTestSuite) SetupSuite() {
 // with the correct DNS name
 func (s *EndpointControllerTestSuite) TestAddDNSName() {
 	p := NewPodReconciler(PodReconcilerConfig{
-		Client:      s.k8sClient,
-		Cluster:     s.cluster,
-		Ctx:         s.ctx,
-		Log:         s.log,
-		PodLabel:    "spiffe",
-		Scheme:      s.scheme,
-		TrustDomain: s.trustDomain,
+		Client:                   s.k8sClient,
+		Cluster:                  s.cluster,
+		Ctx:                      s.ctx,
+		Log:                      s.log,
+		PodLabel:                 "spiffe",
+		Scheme:                   s.scheme,
+		TrustDomain:              s.trustDomain,
+		IdentitySchemaConfigFile: isConfigFileTest,
 	})
 
 	e := NewEndpointReconciler(EndpointReconcilerConfig{
